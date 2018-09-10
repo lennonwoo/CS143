@@ -20,6 +20,11 @@
 #define MAX_STR_CONST 1025
 #define YY_NO_UNPUT   /* keep g++ happy */
 
+/* keep new fl happy */
+#define yywrap() 1
+#define YY_SKIP_YYWRAP
+
+
 extern FILE *fin; /* we read from this file */
 
 /* define YY_INPUT so we read from the FILE fin:
@@ -28,8 +33,8 @@ extern FILE *fin; /* we read from this file */
  */
 #undef YY_INPUT
 #define YY_INPUT(buf,result,max_size) \
-	if ( (result = fread( (char*)buf, sizeof(char), max_size, fin)) < 0) \
-		YY_FATAL_ERROR( "read() in flex scanner failed");
+    if ( (result = fread( (char*)buf, sizeof(char), max_size, fin)) < 0) \
+        YY_FATAL_ERROR( "read() in flex scanner failed");
 
 char string_buf[MAX_STR_CONST]; /* to assemble string constants */
 char *string_buf_ptr;
@@ -42,6 +47,26 @@ extern YYSTYPE cool_yylval;
 /*
  *  Add Your own definitions here
  */
+char *string2low(const char *s) {
+    char *s_low = strdup(s);
+    for (int i = 0; s_low[i]; i++) {
+        s_low[i] = tolower(s_low[i]);
+    }
+    return s_low;
+}
+
+const char *keywords[] = {
+    "class", "else", "fi", "if", "in", "inherits",
+    "let", "loop", "pool", "then", "while",
+    "case", "esac", "of", "new", "not", "isvoid",
+    NULL
+};
+
+const int keyword_token[] = {
+    CLASS, ELSE, FI, IF, IN, INHERITS,
+    LET, LOOP, POOL, THEN, WHILE,
+    CASE, ESAC, OF, NEW, NOT, ISVOID
+};
 
 %}
 
@@ -49,24 +74,114 @@ extern YYSTYPE cool_yylval;
  * Define names for regular expressions here.
  */
 
-DARROW          =>
+DIGIT            [0-9]
+DARROW           =>
+LE               <=
+ASSIGN           <-
+WS               [ \n\f\r\t\v]
+LINE_COMMENT     --
+BEGIN_COMMENT    \(\*
+END_COMMENT      \*\)
+
+LETTER           [a-zA-Z]
 
 %%
+
+{WS}+ {
+    for (int i = 0; yytext[i]; i++) {
+        if (yytext[i] == '\n') {
+            curr_lineno += 1;
+        }
+    }
+}
+
+{LINE_COMMENT} {
+    char c;
+    while ((c = yyinput()) != EOF) {
+        if (c == '\n') break;
+    }
+    curr_lineno += 1;
+}
 
  /*
   *  Nested comments
   */
 
+{BEGIN_COMMENT} {
+    char c;
+    bool last_char_is_star;
+    while ((c = yyinput()) != EOF) {
+        if (c == '\n') {
+            curr_lineno += 1;
+        } else if (c == '*') {
+            last_char_is_star = true;
+            continue;
+        } else if (c == ')' && last_char_is_star) {
+            break;
+        }
+        last_char_is_star = false;
+    }
+
+    if (c == EOF) {
+        // unexpected EOF.
+        cool_yylval.error_msg = "EOF in comment";
+        return ERROR;
+    }
+}
+
+{END_COMMENT} {
+    cool_yylval.error_msg = "Unmatched *)";
+    return ERROR;
+}
+
 
  /*
   *  The multiple-character operators.
   */
-{DARROW}		{ return (DARROW); }
+{DARROW} { return (DARROW); }
+{LE}     { return (LE); }
+{ASSIGN} { return (ASSIGN); }
+
+
+ /*
+  *  The int const
+  */
+{DIGIT}+ {
+    cool_yylval.symbol = inttable.add_string(yytext);
+    return (INT_CONST);
+}
+
 
  /*
   * Keywords are case-insensitive except for the values true and false,
   * which must begin with a lower-case letter.
   */
+{LETTER}({LETTER}|_|{DIGIT})* {
+    for (int i = 0; keywords[i]; i++) {
+        if (strcmp(yytext, keywords[i]) == 0) {
+            cool_yylval.symbol = stringtable.add_string(yytext);
+            return (keyword_token[i]);
+        }
+    }
+
+    char *s_low = string2low(yytext);
+    if ((strcmp(s_low, "true") == 0) ||
+        (strcmp(s_low, "false") == 0)) {
+        cool_yylval.boolean = (strcmp(s_low, "true") == 0)? 1 : 0;
+        free(s_low);
+        return (BOOL_CONST);
+    }
+
+    int res;
+    if (isupper(yytext[0])) {
+        res = OBJECTID;
+    } else {
+        res = TYPEID;
+    }
+    cool_yylval.symbol = idtable.add_string(yytext);
+    free(s_low);
+    return (res);
+}
 
 
  /*
@@ -75,6 +190,72 @@ DARROW          =>
   *  \n \t \b \f, the result is c.
   *
   */
+\" {
+    int p = 0;
+    char c;
+    bool overflow, null_char;
+    overflow = null_char = false;
+
+    while ((c = yyinput()) != EOF) {
+        if (c == '\n' || c == '"') {
+            break;
+        } else if (c == '\\') {
+            c = yyinput();
+            if (c == 'n') c = '\n';
+            else if (c == 't') c = '\t';
+            else if (c == 'b') c = '\b';
+            else if (c == 'f') c = '\f';
+            else if (c == '\0') null_char = true;
+            else if (c == '\n') {
+                curr_lineno += 1;
+                continue;
+            }
+        } else if (c == '\0') {
+            null_char = true;
+        }
+
+        string_buf[p] = c;
+        p += 1;
+        if (p == MAX_STR_CONST) {
+            overflow = true;
+            p -= 1;
+        }
+    }
+
+    if (overflow) {
+        cool_yylval.error_msg = "String constant too long";
+        return ERROR;
+    }
+    if (null_char) {
+        cool_yylval.error_msg = "String contains null character";
+        return ERROR;
+    }
+    if (c == EOF) {
+        cool_yylval.error_msg = "EOF in string constant";
+        return ERROR;
+    }
+    if (c == '\n') {
+        curr_lineno += 1;
+        cool_yylval.error_msg = "Unterminated string constant";
+        return ERROR;
+    }
+
+    string_buf[p] = '\0';
+    cool_yylval.symbol = stringtable.add_string(string_buf);
+    return (STR_CONST);
+}
+
+\'.\' {
+    cool_yylval.symbol = stringtable.add_string(yytext);
+    return STR_CONST;
+}
+
+[+/\-*=<\.~,;:()@{}] { return yytext[0]; }
+
+. {
+    cool_yylval.error_msg = yytext;
+    return ERROR;
+}
 
 
 %%
