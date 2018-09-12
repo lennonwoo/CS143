@@ -47,26 +47,8 @@ extern YYSTYPE cool_yylval;
 /*
  *  Add Your own definitions here
  */
-char *string2low(const char *s) {
-    char *s_low = strdup(s);
-    for (int i = 0; s_low[i]; i++) {
-        s_low[i] = tolower(s_low[i]);
-    }
-    return s_low;
-}
 
-const char *keywords[] = {
-    "class", "else", "fi", "if", "in", "inherits",
-    "let", "loop", "pool", "then", "while",
-    "case", "esac", "of", "new", "not", "isvoid",
-    NULL
-};
-
-const int keyword_token[] = {
-    CLASS, ELSE, FI, IF, IN, INHERITS,
-    LET, LOOP, POOL, THEN, WHILE,
-    CASE, ESAC, OF, NEW, NOT, ISVOID
-};
+static int comment_depth;
 
 %}
 
@@ -78,60 +60,142 @@ DIGIT            [0-9]
 DARROW           =>
 LE               <=
 ASSIGN           <-
-WS               [ \n\f\r\t\v]
-LINE_COMMENT     --
-BEGIN_COMMENT    \(\*
-END_COMMENT      \*\)
-
-LETTER           [a-zA-Z]
+%start COMMENTS
+%start LINE_COMMENTS
+%start STRING
 
 %%
-
-{WS}+ {
-    for (int i = 0; yytext[i]; i++) {
-        if (yytext[i] == '\n') {
-            curr_lineno += 1;
-        }
-    }
-}
-
-{LINE_COMMENT} {
-    char c;
-    while ((c = yyinput()) != EOF) {
-        if (c == '\n') break;
-    }
-    curr_lineno += 1;
-}
 
  /*
   *  Nested comments
   */
 
-{BEGIN_COMMENT} {
-    char c;
-    bool last_char_is_star;
-    while ((c = yyinput()) != EOF) {
-        if (c == '\n') {
-            curr_lineno += 1;
-        } else if (c == '*') {
-            last_char_is_star = true;
-            continue;
-        } else if (c == ')' && last_char_is_star) {
-            break;
-        }
-        last_char_is_star = false;
-    }
-
-    if (c == EOF) {
-        // unexpected EOF.
-        cool_yylval.error_msg = "EOF in comment";
-        return ERROR;
-    }
+<INITIAL,COMMENTS,LINE_COMMENTS>"(*" {
+    comment_depth += 1;
+    BEGIN COMMENTS;
 }
 
-{END_COMMENT} {
+<COMMENTS>[^\n(*]* { }
+<COMMENTS>[()*] { }
+<COMMENTS>"*)" {
+    comment_depth -= 1;
+    if (comment_depth == 0) BEGIN INITIAL;
+}
+
+<COMMENTS><<EOF>> {
+    yylval.error_msg = "EOF in comment";
+    BEGIN INITIAL;
+    return ERROR;
+}
+
+"*)" {
     cool_yylval.error_msg = "Unmatched *)";
     return ERROR;
+}
+
+<INITIAL>"--" {
+    BEGIN LINE_COMMENTS;
+}
+
+<LINE_COMMENTS>[^\n]* { }
+
+<LINE_COMMENTS>\n {
+    curr_lineno += 1;
+    BEGIN INITIAL;
+}
+
+
+ /*
+  *  String constants (C syntax)
+  *  Escape sequence \c is accepted for all characters c. Except for
+  *  \n \t \b \f, the result is c.
+  *
+  */
+<INITIAL>\" {
+    BEGIN STRING;
+    yymore();
+}
+
+<STRING>[^\\\"\n]* { yymore(); }
+<STRING>\\[^\n] { yymore(); }
+<STRING>\\\n {
+    curr_lineno += 1;
+    yymore();
+}
+
+<STRING><<EOF>> {
+    yylval.error_msg = "EOF in string constant";
+    BEGIN 0;
+    yyrestart(yyin);
+    return ERROR;
+}
+
+ /* meet a '\n' in the middle of a string without a '\\', error */
+<STRING>\n {
+    yylval.error_msg = "Unterminated string constant";
+    BEGIN 0;
+    curr_lineno++;
+    return ERROR;
+}
+
+ /* meet a "\\0" ??? */
+<STRING>\\0 {
+    yylval.error_msg = "Unterminated string constant";
+    BEGIN 0;
+    return ERROR;
+}
+
+<STRING>\" {
+    std::string input(yytext, yyleng);
+
+    // remove the '\"'s on both sizes.
+    input = input.substr(1, input.length() - 2);
+
+    std::string output = "";
+    std::string::size_type pos;
+
+    if (input.find_first_of('\0') != std::string::npos) {
+        yylval.error_msg = "String contains null character";
+        BEGIN 0;
+        return ERROR;
+    }
+
+    while ((pos = input.find_first_of("\\")) != std::string::npos) {
+        output += input.substr(0, pos);
+
+        switch (input[pos + 1]) {
+        case 'b':
+            output += "\b";
+            break;
+        case 't':
+            output += "\t";
+            break;
+        case 'n':
+            output += "\n";
+            break;
+        case 'f':
+            output += "\f";
+            break;
+        default:
+            output += input[pos + 1];
+            break;
+        }
+
+        input = input.substr(pos + 2, input.length() - 2);
+    }
+
+    output += input;
+
+    if (output.length() > 1024) {
+        yylval.error_msg = "String constant too long";
+        BEGIN 0;
+        return ERROR;
+    }
+
+    cool_yylval.symbol = stringtable.add_string((char*)output.c_str());
+    BEGIN 0;
+    return STR_CONST;
+
 }
 
 
@@ -156,101 +220,51 @@ LETTER           [a-zA-Z]
   * Keywords are case-insensitive except for the values true and false,
   * which must begin with a lower-case letter.
   */
-{LETTER}({LETTER}|_|{DIGIT})* {
-    for (int i = 0; keywords[i]; i++) {
-        if (strcmp(yytext, keywords[i]) == 0) {
-            cool_yylval.symbol = stringtable.add_string(yytext);
-            return (keyword_token[i]);
-        }
-    }
 
-    char *s_low = string2low(yytext);
-    if ((strcmp(s_low, "true") == 0) ||
-        (strcmp(s_low, "false") == 0)) {
-        cool_yylval.boolean = (strcmp(s_low, "true") == 0)? 1 : 0;
-        free(s_low);
-        return (BOOL_CONST);
-    }
 
-    int res;
-    if (isupper(yytext[0])) {
-        res = OBJECTID;
-    } else {
-        res = TYPEID;
-    }
+(?i:class) { return CLASS; }
+(?i:else) { return ELSE; }
+(?i:fi) { return FI; }
+(?i:if) { return IF; }
+(?i:in) { return IN; }
+(?i:inherits) { return INHERITS; }
+(?i:let) { return LET; }
+(?i:loop) { return LOOP; }
+(?i:pool) { return POOL; }
+(?i:then) { return THEN; }
+(?i:while) { return WHILE; }
+(?i:case) { return CASE; }
+(?i:esac) { return ESAC; }
+(?i:of) { return OF; }
+(?i:new) { return NEW; }
+(?i:not) { return NOT; }
+(?i:isvoid) { return ISVOID; }
+
+t(?i:rue) {
+    cool_yylval.boolean = 1;
+    return BOOL_CONST;
+}
+f(?i:alse) {
+    cool_yylval.boolean = 0;
+    return BOOL_CONST;
+}
+
+[a-z][a-zA-Z0-9_]* {
     cool_yylval.symbol = idtable.add_string(yytext);
-    free(s_low);
-    return (res);
+    return OBJECTID;
 }
 
-
- /*
-  *  String constants (C syntax)
-  *  Escape sequence \c is accepted for all characters c. Except for 
-  *  \n \t \b \f, the result is c.
-  *
-  */
-\" {
-    int p = 0;
-    char c;
-    bool overflow, null_char;
-    overflow = null_char = false;
-
-    while ((c = yyinput()) != EOF) {
-        if (c == '\n' || c == '"') {
-            break;
-        } else if (c == '\\') {
-            c = yyinput();
-            if (c == 'n') c = '\n';
-            else if (c == 't') c = '\t';
-            else if (c == 'b') c = '\b';
-            else if (c == 'f') c = '\f';
-            else if (c == '\0') null_char = true;
-            else if (c == '\n') {
-                curr_lineno += 1;
-                continue;
-            }
-        } else if (c == '\0') {
-            null_char = true;
-        }
-
-        string_buf[p] = c;
-        p += 1;
-        if (p == MAX_STR_CONST) {
-            overflow = true;
-            p -= 1;
-        }
-    }
-
-    if (overflow) {
-        cool_yylval.error_msg = "String constant too long";
-        return ERROR;
-    }
-    if (null_char) {
-        cool_yylval.error_msg = "String contains null character";
-        return ERROR;
-    }
-    if (c == EOF) {
-        cool_yylval.error_msg = "EOF in string constant";
-        return ERROR;
-    }
-    if (c == '\n') {
-        curr_lineno += 1;
-        cool_yylval.error_msg = "Unterminated string constant";
-        return ERROR;
-    }
-
-    string_buf[p] = '\0';
-    cool_yylval.symbol = stringtable.add_string(string_buf);
-    return (STR_CONST);
+[A-Z][a-zA-Z0-9_]* {
+    cool_yylval.symbol = idtable.add_string(yytext);
+    return TYPEID;
 }
 
-\'.\' {
-    cool_yylval.symbol = stringtable.add_string(yytext);
-    return STR_CONST;
-}
+[ \f\r\t\v]+ { }
+
+\n { curr_lineno +=1; }
 
 [+/\-*=<\.~,;:()@{}] { return yytext[0]; }
+
 
 . {
     cool_yylval.error_msg = yytext;

@@ -22,11 +22,12 @@
 //
 // These globals keep everything working.
 //
-FILE *token_file = stdin;		// we read from this file
-extern Classes parse_results;	 // list of classes; used for multiple files 
-extern Program ast_root;	 // the AST produced by the parse
+FILE *token_file = stdin;       // we read from this file
+extern Classes parse_results;    // list of classes; used for multiple files 
+extern Program ast_root;     // the AST produced by the parse
 
 char *curr_filename = "<stdin>";
+int curr_lineno;
 
 extern int omerrs;             // a count of lex and parse errors
 
@@ -37,8 +38,8 @@ int main(int argc, char *argv[]) {
     handle_flags(argc, argv);
     cool_yyparse();
     if (omerrs != 0) {
-	cerr << "Compilation halted due to lex and parse errors\n";
-	exit(1);
+    cerr << "Compilation halted due to lex and parse errors\n";
+    exit(1);
     }
     ast_root->dump_with_types(cout,0);
     return 0;
