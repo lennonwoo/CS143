@@ -2,7 +2,8 @@
 ASSN = 4
 CLASS= cs143
 CLASSDIR= ../..
-LIB= -L/usr/pubsw/lib -lfl 
+# LIB= -L/usr/pubsw/lib -lfl
+LIB= -L/usr/pubsw/lib
 AR= gar
 ARCHIVE_NEW= -cr
 RANLIB= gar -qs
@@ -26,7 +27,7 @@ BFLAGS = -d -v -y -b cool --debug -p cool_yy
 ASTBFLAGS = -d -v -y -b ast --debug -p ast_yy
 
 CC=g++
-CFLAGS=-g -Wall -Wno-unused -Wno-write-strings -Wno-deprecated ${CPPINCLUDE} -DDEBUG
+CFLAGS=-g -std=c++11 -Wall -Wno-unused -Wno-write-strings -Wno-deprecated ${CPPINCLUDE} -DDEBUG
 FLEX=flex ${FFLAGS}
 BISON= bison ${BFLAGS}
 DEPEND = ${CC} -MM ${CPPINCLUDE}

@@ -10,7 +10,99 @@
 
 
 #include "tree.h"
+#include "symtab.h"
 #include "cool-tree.handcode.h"
+
+#include <vector>
+
+struct SymbolPair {
+  Symbol first;
+  Symbol *second;
+};
+
+class ClassGraph {
+public:
+  Symbol name;
+  std::vector<SymbolPair> symbolPairList;
+  ClassGraph* parent;
+  std::vector<ClassGraph*> childs;
+
+  ClassGraph(Symbol name, ClassGraph* parentGraph,
+          std::vector<SymbolPair> symbolPairList)
+          : name(name)
+          , symbolPairList(symbolPairList)
+  { parent = parentGraph; }
+
+  int isSymbolEqual(Symbol s) {
+    return name->equal_string(s->get_string(), s->get_len());
+  }
+
+  ClassGraph* getClassGraph(Symbol className) {
+    if (isSymbolEqual(className)) {
+      return this;
+    } else {
+      for (auto graph : childs) {
+        if (graph->getClassGraph(className)) {
+          return graph;
+        }
+      }
+      return nullptr;
+    }
+  }
+
+  bool haveClass(Symbol className) {
+    return getClassGraph(className) != nullptr;
+  }
+
+  // get the symbol pair from child and its parents
+  std::vector<SymbolPair> getAllSymbolPair(Symbol className) {
+    std::vector<SymbolPair> pairListResult;
+    std::vector<ClassGraph*> graphList;
+
+    ClassGraph* graph = getClassGraph(className);
+    while (graph != nullptr) {
+      graphList.push_back(graph);
+      graph = graph->parent;
+    }
+
+    for (auto graph : graphList) {
+      for (auto pair : graph->symbolPairList) {
+        pairListResult.push_back(pair);
+      }
+    }
+
+    return pairListResult;
+  }
+
+  void appendClass(Symbol parentName, Symbol& className,
+          std::vector<SymbolPair> symbolPairList) {
+    if (getClassGraph(className))
+      return;
+
+    auto graph = getClassGraph(parentName);
+    graph->childs.push_back(new ClassGraph(className, graph, symbolPairList));
+  }
+};
+
+#define SEMANTIC_CHECK_INTERFACE \
+virtual bool semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired=NULL) = 0;
+
+#define SEMANTIC_CHECK_DECLARE \
+bool semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired);
+
+#define SEMANTIC_CHECK_IMPLEMENT(className) \
+bool className::semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired)
+
+#define ITERATE_LIST_NODE(listName) \
+for (int i = 0; i < listName->len(); ++i)
+
+#define SEMANTIC_CHECK() \
+semantic_check(graph, env, NULL)
+
+#define EXPR_SEMANTIC_CHECK(type) \
+semantic_check(graph, env, type)
+
+
 
 
 // define the class for phylum
@@ -35,6 +127,7 @@ class Class__class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Class_(); }
    virtual Class_ copy_Class_() = 0;
+  SEMANTIC_CHECK_INTERFACE
 
 #ifdef Class__EXTRAS
    Class__EXTRAS
@@ -49,6 +142,8 @@ class Feature_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Feature(); }
    virtual Feature copy_Feature() = 0;
+  SEMANTIC_CHECK_INTERFACE
+  virtual SymbolPair getSymbolPair() = 0;
 
 #ifdef Feature_EXTRAS
    Feature_EXTRAS
@@ -63,6 +158,8 @@ class Formal_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Formal(); }
    virtual Formal copy_Formal() = 0;
+  SEMANTIC_CHECK_INTERFACE
+  virtual SymbolPair getSymbolPair() = 0;
 
 #ifdef Formal_EXTRAS
    Formal_EXTRAS
@@ -77,6 +174,7 @@ class Expression_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Expression(); }
    virtual Expression copy_Expression() = 0;
+  SEMANTIC_CHECK_INTERFACE
 
 #ifdef Expression_EXTRAS
    Expression_EXTRAS
@@ -91,6 +189,7 @@ class Case_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Case(); }
    virtual Case copy_Case() = 0;
+  SEMANTIC_CHECK_INTERFACE
 
 #ifdef Case_EXTRAS
    Case_EXTRAS
@@ -161,6 +260,11 @@ public:
    }
    Class_ copy_Class_();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
+
+  Symbol get_name() { return name; }
+  Symbol get_parent() { return parent; }
+  Features get_features() { return features; }
 
 #ifdef Class__SHARED_EXTRAS
    Class__SHARED_EXTRAS
@@ -187,6 +291,8 @@ public:
    }
    Feature copy_Feature();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
+  SymbolPair getSymbolPair() { return {name, &return_type}; }
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -211,6 +317,8 @@ public:
    }
    Feature copy_Feature();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
+  SymbolPair getSymbolPair() { return {name, &type_decl}; }
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -233,6 +341,8 @@ public:
    }
    Formal copy_Formal();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
+  SymbolPair getSymbolPair() { return {name, &type_decl}; }
 
 #ifdef Formal_SHARED_EXTRAS
    Formal_SHARED_EXTRAS
@@ -257,6 +367,7 @@ public:
    }
    Case copy_Case();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Case_SHARED_EXTRAS
    Case_SHARED_EXTRAS
@@ -279,6 +390,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -305,6 +417,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -329,6 +442,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -353,6 +467,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -375,6 +490,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -397,6 +513,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -417,6 +534,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -443,6 +561,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -465,6 +584,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -487,6 +607,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -509,6 +630,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -531,6 +653,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -551,6 +674,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -573,6 +697,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -595,6 +720,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -617,6 +743,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -637,6 +764,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -657,6 +785,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -677,6 +806,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -697,6 +827,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -717,6 +848,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -737,6 +869,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -755,6 +888,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
@@ -775,6 +909,7 @@ public:
    }
    Expression copy_Expression();
    void dump(ostream& stream, int n);
+  SEMANTIC_CHECK_DECLARE
 
 #ifdef Expression_SHARED_EXTRAS
    Expression_SHARED_EXTRAS
