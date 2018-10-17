@@ -31,6 +31,7 @@ public:
   ostream& semant_error(Symbol filename, tree_node *t);
 
   ClassGraph* constructRootGraph();
+  std::vector<ClassContent> getClassContent(Class_ class_);
 
 private:
   void checkInheritanceValid();
@@ -50,9 +51,8 @@ private:
   std::vector<class__class* > classList_;
   std::vector<Symbol > classNameList_;
   std::map<Symbol, std::vector<Symbol > > parentChildMap_;
-  std::map<Symbol, std::vector<SymbolPair > > classContentMap_;
 
-  ClassGraph* rootGraph;
+  ClassGraph* rootGraph_;
 };
 
 

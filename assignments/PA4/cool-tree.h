@@ -15,51 +15,97 @@
 
 #include <vector>
 
-struct SymbolPair {
-  Symbol first;
-  Symbol *second;
+struct ClassContent {
+  Symbol id;
+  Symbol *type;
+  int lineNumber;
+  std::vector<std::pair<Symbol, Symbol> > methodFormals;
 };
 
 class ClassGraph {
 public:
   Symbol name;
-  std::vector<SymbolPair> symbolPairList;
+  std::vector<ClassContent> symbolPairList;
   ClassGraph* parent;
   std::vector<ClassGraph*> childs;
 
   ClassGraph(Symbol name, ClassGraph* parentGraph,
-          std::vector<SymbolPair> symbolPairList)
+          std::vector<ClassContent> symbolPairList)
           : name(name)
           , symbolPairList(symbolPairList)
   { parent = parentGraph; }
+
+  void debug(int indent=0) {
+    cerr << pad(indent) << name << endl;
+    for (auto child : childs) {
+      child->debug(indent+2);
+    }
+  }
 
   int isSymbolEqual(Symbol s) {
     return name->equal_string(s->get_string(), s->get_len());
   }
 
-  ClassGraph* getClassGraph(Symbol className) {
-    if (isSymbolEqual(className)) {
+  ClassGraph* getClassGraph(Symbol classType) {
+    if (isSymbolEqual(classType)) {
       return this;
     } else {
       for (auto graph : childs) {
-        if (graph->getClassGraph(className)) {
-          return graph;
+        if (graph->getClassGraph(classType)) {
+          return graph->getClassGraph(classType);
         }
       }
       return nullptr;
     }
   }
 
-  bool haveClass(Symbol className) {
-    return getClassGraph(className) != nullptr;
+  bool haveClass(Symbol classType) {
+    return getClassGraph(classType) != nullptr;
+  }
+
+  bool parentHaveChild(Symbol parentType, Symbol childType) {
+    if (parentType == nullptr) return true;
+    ClassGraph* parentGraph = getClassGraph(parentType);
+    return parentGraph->getClassGraph(childType) != nullptr;
+  }
+
+  bool parentHaveChild(ClassGraph* parent, ClassGraph* child) {
+    if (child == nullptr) {
+      return false;
+    } else if (child == parent) {
+      return true;
+    } else {
+      return parentHaveChild(parent, child->parent);
+    }
+  }
+
+  ClassGraph* getSameParentGraph(ClassGraph* p1, ClassGraph* p2) {
+    if (p1 == nullptr || p2 == nullptr) {
+      return nullptr;
+    } else if (p1 == p2) {
+      return p1;
+    } else if (parentHaveChild(p1, p2)) {
+      return p1;
+    } else if (parentHaveChild(p2, p1)) {
+      return p2;
+    } else {
+      return getSameParentGraph(p1->parent, p2->parent);
+    }
+  }
+
+  ClassGraph* getSameParentGraph(Symbol s1, Symbol s2) {
+    ClassGraph* p1 = getClassGraph(s1);
+    ClassGraph* p2 = getClassGraph(s2);
+
+    return getSameParentGraph(p1, p2);
   }
 
   // get the symbol pair from child and its parents
-  std::vector<SymbolPair> getAllSymbolPair(Symbol className) {
-    std::vector<SymbolPair> pairListResult;
+  std::vector<ClassContent> getClassContent(Symbol classType) {
+    std::vector<ClassContent> pairListResult;
     std::vector<ClassGraph*> graphList;
 
-    ClassGraph* graph = getClassGraph(className);
+    ClassGraph* graph = getClassGraph(classType);
     while (graph != nullptr) {
       graphList.push_back(graph);
       graph = graph->parent;
@@ -74,13 +120,13 @@ public:
     return pairListResult;
   }
 
-  void appendClass(Symbol parentName, Symbol& className,
-          std::vector<SymbolPair> symbolPairList) {
-    if (getClassGraph(className))
+  void appendClass(Symbol parentType, Symbol& classType,
+          std::vector<ClassContent> symbolPairList) {
+    if (getClassGraph(classType))
       return;
 
-    auto graph = getClassGraph(parentName);
-    graph->childs.push_back(new ClassGraph(className, graph, symbolPairList));
+    auto graph = getClassGraph(parentType);
+    graph->childs.push_back(new ClassGraph(classType, graph, symbolPairList));
   }
 };
 
@@ -97,7 +143,7 @@ bool className::semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *e
 for (int i = 0; i < listName->len(); ++i)
 
 #define SEMANTIC_CHECK() \
-semantic_check(graph, env, NULL)
+semantic_check(graph, env, nullptr)
 
 #define EXPR_SEMANTIC_CHECK(type) \
 semantic_check(graph, env, type)
@@ -143,7 +189,7 @@ public:
    tree_node *copy()		 { return copy_Feature(); }
    virtual Feature copy_Feature() = 0;
   SEMANTIC_CHECK_INTERFACE
-  virtual SymbolPair getSymbolPair() = 0;
+  virtual ClassContent getContent() = 0;
 
 #ifdef Feature_EXTRAS
    Feature_EXTRAS
@@ -159,7 +205,7 @@ public:
    tree_node *copy()		 { return copy_Formal(); }
    virtual Formal copy_Formal() = 0;
   SEMANTIC_CHECK_INTERFACE
-  virtual SymbolPair getSymbolPair() = 0;
+  virtual std::pair<Symbol, Symbol> getFormal() = 0;
 
 #ifdef Formal_EXTRAS
    Formal_EXTRAS
@@ -174,6 +220,35 @@ class Expression_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Expression(); }
    virtual Expression copy_Expression() = 0;
+   Symbol* checkActualValid(
+           std::vector<ClassContent> contentList,
+           Expressions actual, Symbol methodName,
+           ClassGraph* graph, SymbolTable<Symbol, Symbol> *env
+           ) {
+     for (const auto& content : contentList) {
+       if (content.id->equal_string(methodName->get_string(), methodName->get_len())) {
+         std::vector<std::pair<Symbol, Symbol> > methodFormals = content.methodFormals;
+         if (actual->len() != methodFormals.size()) {
+           cerr << "The formal number you input isn't equal with method you declare" << endl;
+           dump_with_types(cerr, 2);
+           return nullptr;
+         }
+
+         ITERATE_LIST_NODE(actual) {
+           Expression e = actual->nth(i);
+           if (e->EXPR_SEMANTIC_CHECK(methodFormals[i].second)) {
+             cerr << "Type not match" << endl;
+             e->dump_with_types(cerr, 2);
+             dump_with_types(cerr, 2);
+             return nullptr;
+           }
+         }
+
+         return content.type;
+       }
+     }
+     return nullptr;
+   }
   SEMANTIC_CHECK_INTERFACE
 
 #ifdef Expression_EXTRAS
@@ -292,7 +367,13 @@ public:
    Feature copy_Feature();
    void dump(ostream& stream, int n);
   SEMANTIC_CHECK_DECLARE
-  SymbolPair getSymbolPair() { return {name, &return_type}; }
+  ClassContent getContent() {
+    std::vector<std::pair<Symbol, Symbol> > methodFormals;
+    ITERATE_LIST_NODE(formals) {
+      Formal f = formals->nth(i);
+      methodFormals.push_back(f->getFormal());
+    }
+    return {name, &return_type, get_line_number(), methodFormals}; }
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -318,7 +399,7 @@ public:
    Feature copy_Feature();
    void dump(ostream& stream, int n);
   SEMANTIC_CHECK_DECLARE
-  SymbolPair getSymbolPair() { return {name, &type_decl}; }
+  ClassContent getContent() { return {name, &type_decl, get_line_number(), std::vector<std::pair<Symbol, Symbol>>()}; }
 
 #ifdef Feature_SHARED_EXTRAS
    Feature_SHARED_EXTRAS
@@ -342,7 +423,7 @@ public:
    Formal copy_Formal();
    void dump(ostream& stream, int n);
   SEMANTIC_CHECK_DECLARE
-  SymbolPair getSymbolPair() { return {name, &type_decl}; }
+  std::pair<Symbol, Symbol> getFormal() { return {name, type_decl}; }
 
 #ifdef Formal_SHARED_EXTRAS
    Formal_SHARED_EXTRAS
