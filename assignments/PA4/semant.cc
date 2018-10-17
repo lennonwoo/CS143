@@ -11,6 +11,8 @@ extern int semant_debug;
 extern char *curr_filename;
 
 const int INDENT = 2;
+int error_num = 0;
+char *current_method_name;
 
 // This is some helper function
 int symbolEqual(Symbol s1, Symbol s2) {
@@ -19,12 +21,33 @@ int symbolEqual(Symbol s1, Symbol s2) {
 
 void error_place(tree_node* t) {
   cerr << curr_filename << ":" << t->get_line_number() << ": ";
+  error_num += 1;
 }
 
-void error_type_mismatch(Symbol assignType, Symbol declareType, Symbol id) {
-	cerr << "Type " << assignType << " of assigned expression does not conform to ";
-	cerr << "declared type " << declareType << " of identifier " << id << "." << endl;
+void error_type_mismatch(tree_node *t, Symbol type, Symbol declareType, Symbol id) {
+	error_place(t);
+  if (current_method_name == nullptr) {
+		cerr << "Type " << type << " of assigned expression does not conform to ";
+		cerr << "declared type " << declareType << " of identifier " << id << "." << endl;
+  } else {
+		cerr << "In call of method " << current_method_name << ", ";
+		cerr << "Type " << type << " of parameter " << id << " ";
+		cerr << "does not conform to declare type " << declareType << "." << endl;
+  }
 }
+
+void error_undeclare(tree_node* t, Symbol s) {
+	error_place(t);
+	cerr << "Undeclared identifier " << s << "." << endl;
+}
+
+void check_class_exist(Symbol class_name, ClassGraph* graph, tree_node* t) {
+  if (!graph->haveClass(class_name)) {
+    error_undeclare(t, class_name);
+  }
+}
+
+#define CHECK_CLASS_EXIST(name) check_class_exist(name, graph, this)
 
 void debug() {
 	cerr << "debug" << endl;
@@ -107,11 +130,7 @@ std::vector<ClassContent> ClassTable::getClassContent(Class_ class_) {
 	ITERATE_LIST_NODE(features) {
 		Feature f = features->nth(i);
 		ClassContent content = f->getContent();
-    if (symbolEqual(content.id, self)) {
-      semant_error(c->get_filename(), f);
-      cout << "'self' cannot be the name of an attribute." << endl;
-    }
-		pairListResult.push_back(f->getContent());
+		pairListResult.push_back(content);
 	}
 	return pairListResult;
 }
@@ -308,11 +327,6 @@ void program_class::semant() {
 
 	ClassTable *classtable = new ClassTable(classes);
 
-	if (classtable->errors()) {
-		cerr << "Compilation halted due to static semantic errors." << endl;
-		exit(1);
-	}
-
 	ClassGraph* graph = classtable->constructRootGraph();
 	SymbolTable<Symbol, Symbol> *env = new SymbolTable<Symbol, Symbol>();
 
@@ -326,40 +340,31 @@ void program_class::semant() {
 			env->addid(pair.id, pair.type);
 		}
 		env->addid(SELF_TYPE, &className);
+		env->addid(self, &className);
 
-	  if (c->SEMANTIC_CHECK()) {
-			classtable->semant_error(c);
-	  }
+	  c->SEMANTIC_CHECK();
 
 		env->exitscope();
 
-		if (classtable->errors()) {
+	  if (error_num > 0) {
+	  	error_num = 0;
 			cerr << "Compilation halted due to static semantic errors." << endl;
 			exit(1);
-		}
+	  }
 	}
 }
 
 SEMANTIC_CHECK_IMPLEMENT(class__class) {
   ITERATE_LIST_NODE(features) {
-  	Feature f = features->nth(i);
-  	if (f->SEMANTIC_CHECK()) {
-  		return true;
-  	}
+  	features->nth(i)->SEMANTIC_CHECK();
   }
-
-  return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(method_class) {
-	if (!graph->haveClass(return_type)) {
-		cerr << "type not defined" << return_type << endl;
-		return true;
-	}
+	CHECK_CLASS_EXIST(return_type);
 
 	ITERATE_LIST_NODE(formals) {
-		Formal f = formals->nth(i);
-	  if (f->SEMANTIC_CHECK()) { return true; }
+		formals->nth(i)->SEMANTIC_CHECK();
 	}
 
 	env->enterscope();
@@ -369,190 +374,149 @@ SEMANTIC_CHECK_IMPLEMENT(method_class) {
 		env->addid(pair.first, &pair.second);
 	}
 
-	if (expr->EXPR_SEMANTIC_CHECK(return_type)) {
-		env->exitscope();
-		return true;
-	} else {
-		env->exitscope();
-		return false;
-	}
+	expr->EXPR_SEMANTIC_CHECK(return_type);
+  env->exitscope();
 }
 
 SEMANTIC_CHECK_IMPLEMENT(attr_class) {
-	if (!graph->haveClass(type_decl)) {
-		cerr << "type not defined" << type_decl << endl;
-		return true;
+	CHECK_CLASS_EXIST(type_decl);
+
+	if (symbolEqual(name, self)) {
+		error_place(this);
+		cout << "'self' cannot be the name of an attribute." << endl;
 	}
 
-	if (init->EXPR_SEMANTIC_CHECK(type_decl)) {
-	  cerr << "init not valid" << endl;
-		init->dump_with_types(cerr, INDENT);
-		return true;
-	}
-
-	return false;
+	init->EXPR_SEMANTIC_CHECK(type_decl);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(formal_class) {
-  if (!graph->haveClass(type_decl)) {
-		cerr << "type not defined" << type_decl << endl;
-  	return true;
-  }
-
-  return false;
+  CHECK_CLASS_EXIST(type_decl);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(assign_class) {
-  if (expr->EXPR_SEMANTIC_CHECK(typeRequired)) {
-    expr->dump_with_types(cerr, INDENT);
-  	return true;
-	} else if (env->lookup(name)) {
-  	Symbol declareType = *env->lookup(name);
-  	Symbol assignType = expr->get_type();
+  expr->EXPR_SEMANTIC_CHECK(typeRequired);
 
-  	if (!graph->parentHaveChild(declareType, assignType)) {
-			error_place(this);
-			error_type_mismatch(assignType, declareType, name);
-			return true;
-  	}
-  } else {
-  	set_type(expr->get_type());
-  	env->addid(name, &type);
-  	return false;
-  }
+	Symbol assignType = expr->get_type();
+	Symbol* declareType = env->lookup(name);
+	if (declareType) {
+		if (!graph->parentHaveChild(*declareType, assignType)) {
+			error_type_mismatch(this, assignType, *declareType, name);
+		}
+	}
+
+  set_type(assignType);
+  env->addid(name, &assignType);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(static_dispatch_class) {
 	// check expr validity, then we can get the class type
-	if (expr->EXPR_SEMANTIC_CHECK(nullptr)) {
-		expr->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	expr->EXPR_SEMANTIC_CHECK(nullptr);
 
-	if (!graph->haveClass(type_name)) {
-		cerr << "type not defined" << type_name << endl;
-		dump_with_types(cerr, INDENT);
-		return true;
-	}
+	CHECK_CLASS_EXIST(type_name);
 
-	Symbol childType = expr->get_type();
-	if (graph->parentHaveChild(type_name, childType)) {
-		cerr << "The type of expr is not the child of static type" << endl;
-		cerr << "Child: " << childType << " parent: " << type_name << endl;
-		dump_with_types(cerr, INDENT);
-		return true;
+	Symbol exprType = expr->get_type();
+	if (graph->parentHaveChild(type_name, exprType)) {
+	  error_place(this);
+		cerr << "Expression type " << type_name << " does not conform to ";
+		cerr << "declared static dispatch type" << name << "." << endl;
 	}
 
 	std::vector<ClassContent> contentList = graph->getClassContent(type_name);
-	Symbol* method_return_type = checkActualValid(contentList, actual, name, graph, env);
-	if (method_return_type) {
-		set_type(*method_return_type);
-		return false;
-	} else {
-		return true;
+
+	for (const auto& content : contentList) {
+		if (content.id->equal_string(name->get_string(), name->get_len())) {
+			std::vector<std::pair<Symbol, Symbol> > methodFormals = content.methodFormals;
+			if (actual->len() != methodFormals.size()) {
+				cerr << "formals don't equal" << endl;
+				error_num += 1;
+			}
+
+			current_method_name = name->get_string();
+			ITERATE_LIST_NODE(actual) {
+				actual->nth(i)->EXPR_SEMANTIC_CHECK(methodFormals[i].second);
+			}
+
+      set_type(*content.type);
+			current_method_name = nullptr;
+			return;
+		}
 	}
+
+	error_place(this);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(dispatch_class) {
 	// check expr validity, then we can get the class type
-	if (expr->EXPR_SEMANTIC_CHECK(nullptr)) {
-		expr->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	expr->EXPR_SEMANTIC_CHECK(nullptr);
 
 	Symbol type = expr->get_type();
 	type = symbolEqual(type, SELF_TYPE) ? *env->lookup(SELF_TYPE) : type;
 	std::vector<ClassContent> contentList = graph->getClassContent(type);
-	Symbol* method_return_type = checkActualValid(contentList, actual, name, graph, env);
-	if (method_return_type) {
-		set_type(*method_return_type);
-		return false;
-	} else {
-		return true;
+
+	for (const auto& content : contentList) {
+		if (content.id->equal_string(name->get_string(), name->get_len())) {
+			std::vector<std::pair<Symbol, Symbol> > methodFormals = content.methodFormals;
+			if (actual->len() != methodFormals.size()) {
+				cerr << "formals don't equal" << endl;
+				error_num += 1;
+			}
+
+			current_method_name = name->get_string();
+			ITERATE_LIST_NODE(actual) {
+				actual->nth(i)->EXPR_SEMANTIC_CHECK(methodFormals[i].second);
+			}
+
+			set_type(*content.type);
+			current_method_name = nullptr;
+      return;
+		}
 	}
+
+	error_place(this);
+	cerr << "Dispatch to undefined method " << name << "." << endl;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(cond_class) {
 	// pred must have type of bool
-	if (pred->EXPR_SEMANTIC_CHECK(Bool)) {
-		cerr << "pred is not bool type" << endl;
-		pred->dump_with_types(cerr, INDENT);
-		return true;
-	}
-
-	if (then_exp->EXPR_SEMANTIC_CHECK(nullptr)) {
-		cerr << "then_exp type check error" << endl;
-		then_exp->dump_with_types(cerr, INDENT);
-		return true;
-	}
-
-	if (else_exp->EXPR_SEMANTIC_CHECK(nullptr)) {
-		cerr << "else_exp type check error" << endl;
-		else_exp->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	pred->EXPR_SEMANTIC_CHECK(Bool);
+	then_exp->EXPR_SEMANTIC_CHECK(nullptr);
+	else_exp->EXPR_SEMANTIC_CHECK(nullptr);
 
 	Symbol thenType = then_exp->get_type();
 	Symbol elseType = else_exp->get_type();
 	ClassGraph* sameParent = graph->getSameParentGraph(thenType, elseType);
 	if (sameParent == nullptr) {
 	  cerr << "This won't happen, every type have same parent: Object" << endl;
-	  return true;
+	  error_num += 1;
 	} else if (!graph->parentHaveChild(typeRequired, sameParent->name)) {
 	  cerr << "The type required don't have child of then/else type" << endl;
 		cerr << "type required: " << typeRequired << " then/else type: " << sameParent << endl;
-		return true;
+		error_num += 1;
 	} else {
 		set_type(sameParent->name);
-		return false;
 	}
 }
 
 SEMANTIC_CHECK_IMPLEMENT(loop_class) {
-	if (pred->EXPR_SEMANTIC_CHECK(Bool)) {
-		cerr << "pred is not bool type" << endl;
-		pred->dump_with_types(cerr, INDENT);
-		return true;
-	}
-
-	if (body->EXPR_SEMANTIC_CHECK(Object)) {
-		cerr << "pred is not bool type" << endl;
-		body->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	pred->EXPR_SEMANTIC_CHECK(Bool);
+	body->EXPR_SEMANTIC_CHECK(Object);
 
 	set_type(Object);
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(typcase_class) {
-  if (expr->EXPR_SEMANTIC_CHECK(nullptr)) {
-    expr->dump_with_types(cerr, INDENT);
-    return true;
-  }
+  expr->EXPR_SEMANTIC_CHECK(nullptr);
 
   ITERATE_LIST_NODE(cases) {
-  	Case c = cases->nth(i);
-  	if (c->EXPR_SEMANTIC_CHECK(nullptr)) {
-  		c->dump_with_types(cerr, INDENT);
-  		return true;
-  	}
+  	cases->nth(i)->EXPR_SEMANTIC_CHECK(nullptr);
   }
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(branch_class) {
-	if (!graph->haveClass(type_decl)) {
-		cerr << "type not defined" << type_decl << endl;
-		return true;
-	}
+  CHECK_CLASS_EXIST(type_decl);
 
-	if (expr->EXPR_SEMANTIC_CHECK(type_decl)) {
-		expr->dump_with_types(cerr, INDENT);
-		return true;
-	}
-
-	return false;
+	expr->EXPR_SEMANTIC_CHECK(type_decl);
+	// TODO check the branch type
 }
 
 SEMANTIC_CHECK_IMPLEMENT(block_class) {
@@ -560,221 +524,124 @@ SEMANTIC_CHECK_IMPLEMENT(block_class) {
 
 	Symbol checkType;
   ITERATE_LIST_NODE(body) {
-  	Expression e = body->nth(i);
-  	e->dump_with_types(cerr, INDENT);
   	if (i == (body->len()-1)) {
   		checkType = typeRequired;
   	} else {
   		checkType = nullptr;
   	}
-  	if (e->EXPR_SEMANTIC_CHECK(checkType)) {
-  	  e->dump_with_types(cerr, INDENT);
-  	  return true;
-  	}
+		body->nth(i)->EXPR_SEMANTIC_CHECK(checkType);
   }
 
 	Symbol type = body->nth(body->len()-1)->get_type();
   set_type(type);
 	env->exitscope();
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(let_class) {
-	if (!graph->haveClass(type_decl)) {
-		cerr << "type not decalred: " << type_decl << endl;
-		return true;
-	}
+  CHECK_CLASS_EXIST(type_decl);
 
-	if (init->EXPR_SEMANTIC_CHECK(type_decl)) {
-		cerr << "type mismatch: " << type_decl << endl;
-		init->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	init->EXPR_SEMANTIC_CHECK(type_decl);
 
 	env->addid(identifier, &type_decl);
-	if (body->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		body->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	body->EXPR_SEMANTIC_CHECK(typeRequired);
 
 	set_type(body->get_type());
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(plus_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
 	set_type(e1->get_type());
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(sub_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
 	set_type(e1->get_type());
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(mul_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
 	set_type(e1->get_type());
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(divide_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
 	set_type(e1->get_type());
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(neg_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(Bool)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(Bool);
 
-	set_type(e1->get_type());
-	return false;
+	set_type(Bool);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(lt_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
-	set_type(e1->get_type());
-	return false;
+	set_type(Bool);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(eq_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
-	set_type(e1->get_type());
-	return false;
+	set_type(Bool);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(leq_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(typeRequired)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
-	if (e2->EXPR_SEMANTIC_CHECK(e1->get_type())) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e2->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(typeRequired);
+	e2->EXPR_SEMANTIC_CHECK(e1->get_type());
 
-	set_type(e1->get_type());
-	return false;
+	set_type(Bool);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(comp_class) {
-	if (e1->EXPR_SEMANTIC_CHECK(Int)) {
-		cerr << "type mismatch: " << typeRequired << endl;
-		e1->dump_with_types(cerr, INDENT);
-		return true;
-	}
+	e1->EXPR_SEMANTIC_CHECK(Int);
 
 	set_type(e1->get_type());
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(int_const_class) {
 	if (typeRequired != nullptr
-			&& !symbolEqual(Int, typeRequired)) {
-		cerr << "type required: " << typeRequired << " in int_const_class" << endl;
-		return true;
+			&& !graph->parentHaveChild(typeRequired, Int)) {
+	  cerr << "int_const_class error" << endl;
+		error_num += 1;
 	}
 
 	set_type(Int);
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(bool_const_class) {
 	if (typeRequired != nullptr
-			&& !symbolEqual(Bool, typeRequired)) {
-		cerr << "type required: " << typeRequired << " in bool_const_class" << endl;
-		return true;
+			&& !graph->parentHaveChild(typeRequired, Bool)) {
+		cerr << "bool_const_class error" << endl;
+		error_num += 1;
 	}
 
 	set_type(Bool);
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(string_const_class) {
 	if (typeRequired != nullptr
-			&& !symbolEqual(Str, typeRequired)) {
-		cerr << "type required: " << typeRequired << " in string_const_class" << endl;
-		return true;
+			&& !graph->parentHaveChild(typeRequired, Str)) {
+		cerr << "str_const_class error" << endl;
+		error_num += 1;
 	}
 
 	set_type(Str);
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(new__class) {
 	// First, check if type_name exist
-	if (!graph->haveClass(type_name)) {
-		cerr << "type not declared: " << type_name << endl;
-		return true;
-	}
+	CHECK_CLASS_EXIST(type_name);
 
 	// Then, check if type_name is SELF_TYPE
 	Symbol typeToSet = type_name;
@@ -785,32 +652,32 @@ SEMANTIC_CHECK_IMPLEMENT(new__class) {
 	if (typeRequired == nullptr) {
 		// If type required is null, just set type
 		set_type(typeToSet);
-		return false;
 	} else if (graph->parentHaveChild(typeRequired, type_name)) {
 	  // Then check if type required is the type_name's parent
 	  set_type(typeToSet);
-	  return false;
 	} else {
-	  return true;
+	  // TODO hint the error
+		cerr << "new__class error" << endl;
+	  error_num += 1;
 	}
 }
 
 SEMANTIC_CHECK_IMPLEMENT(isvoid_class) {
-  if (e1->EXPR_SEMANTIC_CHECK(nullptr)) {
-    e1->dump_with_types(cerr, INDENT);
-		return true;
-  }
-
+  e1->EXPR_SEMANTIC_CHECK(nullptr);
   set_type(Bool);
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(no_expr_class) {
   set_type(No_type);
-	return false;
 }
 
 SEMANTIC_CHECK_IMPLEMENT(object_class) {
-	set_type(*env->lookup(SELF_TYPE));
-	return false;
+  error_num += 1;
+  if (!env->lookup(name)) {
+  	error_undeclare(this, name);
+  } else if (!graph->parentHaveChild(typeRequired, *env->lookup(name))) {
+    error_type_mismatch(this, *env->lookup(name), typeRequired, name);
+	} else {
+		set_type(*env->lookup(name));
+	}
 }

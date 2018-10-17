@@ -131,13 +131,13 @@ public:
 };
 
 #define SEMANTIC_CHECK_INTERFACE \
-virtual bool semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired=NULL) = 0;
+virtual void semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired=NULL) = 0;
 
 #define SEMANTIC_CHECK_DECLARE \
-bool semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired);
+void semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired);
 
 #define SEMANTIC_CHECK_IMPLEMENT(className) \
-bool className::semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired)
+void className::semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired)
 
 #define ITERATE_LIST_NODE(listName) \
 for (int i = 0; i < listName->len(); ++i)
@@ -220,35 +220,6 @@ class Expression_class : public tree_node {
 public:
    tree_node *copy()		 { return copy_Expression(); }
    virtual Expression copy_Expression() = 0;
-   Symbol* checkActualValid(
-           std::vector<ClassContent> contentList,
-           Expressions actual, Symbol methodName,
-           ClassGraph* graph, SymbolTable<Symbol, Symbol> *env
-           ) {
-     for (const auto& content : contentList) {
-       if (content.id->equal_string(methodName->get_string(), methodName->get_len())) {
-         std::vector<std::pair<Symbol, Symbol> > methodFormals = content.methodFormals;
-         if (actual->len() != methodFormals.size()) {
-           cerr << "The formal number you input isn't equal with method you declare" << endl;
-           dump_with_types(cerr, 2);
-           return nullptr;
-         }
-
-         ITERATE_LIST_NODE(actual) {
-           Expression e = actual->nth(i);
-           if (e->EXPR_SEMANTIC_CHECK(methodFormals[i].second)) {
-             cerr << "Type not match" << endl;
-             e->dump_with_types(cerr, 2);
-             dump_with_types(cerr, 2);
-             return nullptr;
-           }
-         }
-
-         return content.type;
-       }
-     }
-     return nullptr;
-   }
   SEMANTIC_CHECK_INTERFACE
 
 #ifdef Expression_EXTRAS
