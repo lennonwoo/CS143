@@ -131,22 +131,19 @@ public:
 };
 
 #define SEMANTIC_CHECK_INTERFACE \
-virtual void semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired=NULL) = 0;
+virtual void semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env) = 0;
 
 #define SEMANTIC_CHECK_DECLARE \
-void semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired);
+void semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env);
 
 #define SEMANTIC_CHECK_IMPLEMENT(className) \
-void className::semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env, Symbol typeRequired)
+void className::semantic_check(ClassGraph* graph, SymbolTable<Symbol, Symbol> *env)
 
 #define ITERATE_LIST_NODE(listName) \
 for (int i = 0; i < listName->len(); ++i)
 
 #define SEMANTIC_CHECK() \
-semantic_check(graph, env, nullptr)
-
-#define EXPR_SEMANTIC_CHECK(type) \
-semantic_check(graph, env, type)
+semantic_check(graph, env)
 
 
 

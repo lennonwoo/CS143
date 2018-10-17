@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <map>
+#include <set>
 
 #define TRUE 1
 #define FALSE 0
@@ -31,7 +32,7 @@ public:
   ostream& semant_error(Symbol filename, tree_node *t);
 
   ClassGraph* constructRootGraph();
-  std::vector<ClassContent> getClassContent(Class_ class_);
+  std::vector<ClassContent> getClassContent(Class__class *class_);
 
 private:
   void checkInheritanceValid();
@@ -48,9 +49,9 @@ private:
   void install_basic_classes();
   ostream& error_stream;
 
-  std::vector<class__class* > classList_;
   std::vector<Symbol > classNameList_;
-  std::map<Symbol, std::vector<Symbol > > parentChildMap_;
+  std::set<Symbol > parentNameList_;
+  std::map<Symbol, Class_> nameClassMap_;
 
   ClassGraph* rootGraph_;
 };
