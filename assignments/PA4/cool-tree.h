@@ -417,6 +417,8 @@ public:
    Case copy_Case();
    void dump(ostream& stream, int n);
   SEMANTIC_CHECK_DECLARE
+  Symbol getCaseType() { return type_decl; }
+  Symbol getReturnType() { return expr->get_type(); }
 
 #ifdef Case_SHARED_EXTRAS
    Case_SHARED_EXTRAS

@@ -98,7 +98,8 @@ void error_place(tree_node* t) {
 
 void error_if_assign_type_mismatch(tree_node *t, ClassGraph *graph,
 																	 Symbol realType, Symbol wantedType, Symbol id) {
-	if (symbolEqual(No_type, realType)) {
+	if (symbolEqual(No_type, realType)
+			|| symbolEqual(realType, wantedType)) {
 		return;
 	}
 
@@ -142,6 +143,9 @@ void error_undeclare(tree_node* t, Symbol s) {
 }
 
 void check_class_exist(Symbol class_name, ClassGraph* graph, tree_node* t) {
+	if (symbolEqual(class_name, SELF_TYPE)) {
+		return;
+	}
 	if (!graph->haveClass(class_name)) {
 		error_undeclare(t, class_name);
 	}
@@ -181,11 +185,20 @@ ClassTable::ClassTable(Classes classes) : semant_errors(0) , error_stream(cerr) 
 
 	ITERATE_LIST_NODE(classes) {
 		class__class *c = dynamic_cast<class__class*>(classes->nth(i));
+		curr_filename = c->get_filename()->get_string();
 		Symbol name = c->get_name();
 		Symbol parent = c->get_parent();
-		classNameList_.push_back(name);
-		parentNameList_.insert(parent);
-		nameClassMap_[name] = c;
+		if (symbolEqual(parent, Bool)
+				|| symbolEqual(parent, SELF_TYPE)
+				|| symbolEqual(parent, Str)
+						) {
+			error_place(c);
+			cerr << "Class " << name << " cannot inherit class " << parent << "." << endl;
+		} else {
+			classNameList_.push_back(name);
+			parentNameList_.insert(parent);
+			nameClassMap_[name] = c;
+		}
 	}
 
 	checkInheritanceValid();
@@ -416,11 +429,20 @@ SEMANTIC_CHECK_IMPLEMENT(method_class) {
 		formals->nth(i)->SEMANTIC_CHECK();
 	}
 
+	std::set<Symbol> paraNameList;
+	Symbol paraName;
 	env->enterscope();
 	ITERATE_LIST_NODE(formals) {
 		Formal f = formals->nth(i);
 		std::pair<Symbol, Symbol> pair = f->getFormal();
 		env->addid(pair.first, &pair.second);
+		paraName = pair.first;
+		if (paraNameList.count(paraName) == 0) {
+			paraNameList.insert(paraName);
+		} else {
+			error_place(this);
+			cerr << "Formal parameter " << paraName << " is multiply defined." << endl;
+		}
 	}
 
 	expr->SEMANTIC_CHECK();
@@ -447,14 +469,16 @@ SEMANTIC_CHECK_IMPLEMENT(formal_class) {
 SEMANTIC_CHECK_IMPLEMENT(assign_class) {
   expr->SEMANTIC_CHECK();
 
-	Symbol assignType = expr->get_type();
+	Symbol assignType = (expr->get_type());
 	Symbol* declareType = env->lookup(name);
 	if (declareType) {
 		error_if_assign_type_mismatch(this, graph, assignType, *declareType, name);
 	}
 
   set_type(assignType);
-  env->addid(name, &assignType);
+	// TODO ugly new
+	Symbol *t = new Symbol(assignType);
+  env->addid(name, t);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(static_dispatch_class) {
@@ -562,17 +586,42 @@ SEMANTIC_CHECK_IMPLEMENT(loop_class) {
 
 SEMANTIC_CHECK_IMPLEMENT(typcase_class) {
   expr->SEMANTIC_CHECK();
+  std::set<Symbol > caseTypeSet;
 
+  std::vector<Symbol > returnTypeList;
   ITERATE_LIST_NODE(cases) {
-  	cases->nth(i)->SEMANTIC_CHECK();
+    branch_class* b = dynamic_cast<branch_class*>(cases->nth(i));
+  	b->SEMANTIC_CHECK();
+  	Symbol caseType = b->getCaseType();
+		Symbol returnType = b->getReturnType();
+		returnTypeList.push_back(returnType);
+  	if (caseTypeSet.count(caseType) > 0) {
+  		error_place(this);
+  		cerr << "Duplicate branch " << caseType << " in case statement." << endl;
+  		set_type(No_type);
+  		return;
+  	} else {
+  	  caseTypeSet.insert(caseType);
+  	}
   }
+
+  if (returnTypeList.size() == 1) {
+    set_type(returnTypeList[0]);
+  }
+
+  Symbol type = graph->getSameParentGraph(returnTypeList[0], returnTypeList[2])->name;
+  for (int i = 2; i < returnTypeList.size(); i++) {
+    type = graph->getSameParentGraph(returnTypeList[i], type)->name;
+  }
+  set_type(type);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(branch_class) {
-  CHECK_CLASS_EXIST(type_decl);
-
+  env->enterscope();
+  env->addid(name, &type_decl);
 	expr->SEMANTIC_CHECK();
-	error_if_assign_type_mismatch(this, graph, expr->type, type_decl, expr->type);
+	env->exitscope();
+	//error_if_assign_type_mismatch(this, graph, expr->type, type_decl, expr->type);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(block_class) {
@@ -588,13 +637,20 @@ SEMANTIC_CHECK_IMPLEMENT(block_class) {
 }
 
 SEMANTIC_CHECK_IMPLEMENT(let_class) {
+  if (symbolEqual(identifier, self)) {
+  	error_place(this);
+  	cerr << "'self' cannot be bound in a 'let' expression." << endl;
+		return;
+  }
   CHECK_CLASS_EXIST(type_decl);
 
 	init->SEMANTIC_CHECK();
 	error_if_type_mismatch(this, graph, init->type, type_decl);
 
+	env->enterscope();
 	env->addid(identifier, &type_decl);
 	body->SEMANTIC_CHECK();
+	env->exitscope();
 
 	set_type(body->get_type());
 }
@@ -633,9 +689,13 @@ SEMANTIC_CHECK_IMPLEMENT(divide_class) {
 
 SEMANTIC_CHECK_IMPLEMENT(neg_class) {
 	e1->SEMANTIC_CHECK();
-	error_if_type_mismatch(this, graph, Bool, e1->type);
-
-	set_type(Bool);
+	if (symbolEqual(Int, e1->type)) {
+		set_type(Int);
+	} else if (symbolEqual(Bool, e1->type)) {
+		set_type(Bool);
+	} else {
+		error_if_type_mismatch(this, graph, Bool, e1->type);
+	}
 }
 
 SEMANTIC_CHECK_IMPLEMENT(lt_class) {
@@ -664,9 +724,9 @@ SEMANTIC_CHECK_IMPLEMENT(leq_class) {
 
 SEMANTIC_CHECK_IMPLEMENT(comp_class) {
 	e1->SEMANTIC_CHECK();
-	error_if_type_mismatch(this, graph, Int, e1->type);
+	error_if_type_mismatch(this, graph, Bool, e1->type);
 
-	set_type(Int);
+	set_type(Bool);
 }
 
 SEMANTIC_CHECK_IMPLEMENT(int_const_class) {
