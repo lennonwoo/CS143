@@ -2,7 +2,8 @@
 ASSN = 5
 CLASS= cs143
 CLASSDIR= ../..
-LIB= -L/usr/pubsw/lib -lfl 
+#LIB= -L/usr/pubsw/lib -lfl
+LIB= -L/usr/pubsw/lib
 AR= gar
 ARCHIVE_NEW= -cr
 RANLIB= gar -qs
