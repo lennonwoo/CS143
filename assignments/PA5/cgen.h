@@ -1,5 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
+#include <map>
+#include <vector>
 #include "emit.h"
 #include "cool-tree.h"
 #include "symtab.h"
@@ -7,6 +9,9 @@
 enum Basicness     {Basic, NotBasic};
 #define TRUE 1
 #define FALSE 0
+
+#define ITERATE_LIST_NODE(listName) \
+for (int i = 0; i < listName->len(); ++i)
 
 class CgenClassTable;
 typedef CgenClassTable *CgenClassTableP;
@@ -21,6 +26,9 @@ private:
    int stringclasstag;
    int intclasstag;
    int boolclasstag;
+  std::map<Symbol, int> symbolTagMap;
+  std::vector<Symbol> symbolTabList;
+  int classTagIndex;
 
 
 // The following methods emit code for
@@ -31,6 +39,11 @@ private:
    void code_bools(int);
    void code_select_gc();
    void code_constants();
+   void code_prototype_objects();
+   void code_nameTab();
+   void code_dispatch_tables();
+   void code_class_initializer();
+   void code_class_methods();
 
 // The following creates an inheritance graph from
 // a list of classes.  The graph is implemented as
@@ -44,6 +57,8 @@ private:
    void set_relations(CgenNodeP nd);
 public:
    CgenClassTable(Classes, ostream& str);
+  int getTag(Symbol s);
+  int getTag(CgenNode *node);
    void code();
    CgenNodeP root();
 };
@@ -60,6 +75,16 @@ public:
    CgenNode(Class_ c,
             Basicness bstatus,
             CgenClassTableP class_table);
+
+  int get_attr_size();
+  void code_prototype(ostream &s, CgenClassTable *table);
+  void code_dispatch(ostream &s, CgenClassTable *table);
+  void code_init(ostream &s, CgenClassTable *table);
+  void code_methods(ostream &s, CgenClassTable *table);
+
+  int place_attr_list(ostream &s, CgenClassTable *table, int offset);
+  int place_method_list(ostream &s, CgenClassTable *table, int offset);
+  int attrs_init(ostream &s, CgenClassTable *table, int attr_pos);
 
    void add_child(CgenNodeP child);
    List<CgenNode> *get_children() { return children; }
