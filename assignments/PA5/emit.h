@@ -55,11 +55,15 @@
 
 #define STRING_SLOTS      1
 #define INT_SLOTS         1
-#define BOOL_SLOTS        1
+#define BOOL_SLOTS        3
 
 #define GLOBAL        "\t.globl\t"
 #define ALIGN         "\t.align\t2\n"
 #define WORD          "\t.word\t"
+#define BYTE          "\t.byte\t"
+
+#define TRUE_LA    "bool_const1 #true"
+#define FALSE_LA   "bool_const0 #false"
 
 //
 // register names

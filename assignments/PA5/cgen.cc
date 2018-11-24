@@ -31,8 +31,9 @@ Symbol current_class_name, dispatch_class_name;
 std::map<Symbol, std::map<Symbol, int> > class_func_offset_map;
 std::map<Symbol, std::map<Symbol, int> > class_attr_offset_map;
 SymbolTable<Symbol, int> env;
-int func_obj_num;
+int func_obj_num, label_num;
 method_class *curr_method = nullptr;
+#define ENABLE_DEBUG 1
 
 //
 // Three symbols from the semantic analyzer (semant.cc) are used.
@@ -156,10 +157,6 @@ int get_formal_offset(Symbol name) {
       return (curr_method->formals->len()-i) + 2;
   }
   return -1;
-}
-
-void debug(Symbol name, ostream &s) {
-  s << "DEBUG: " << "name: " << name << endl;
 }
 
 
@@ -401,6 +398,58 @@ static void emit_gc_check(char *source, ostream &s)
   s << JAL << "_gc_check" << endl;
 }
 
+static void emit_alloc_obj(Symbol name, ostream &s) {
+  if (name == IO) {
+    s << "#init IO as void(0)" << endl;
+    emit_load_imm(ACC, 0, s);
+  } else {
+    s << LA << ACC << " " << name << PROTOBJ_SUFFIX << endl;
+    s << JAL << "Object.copy" << endl;
+  }
+}
+
+static void emit_before_method(method_class *f, ostream &s) {
+  curr_method = f;
+  env.enterscope();
+  func_obj_num = 0;
+  emit_push(RA, s); // the RA may change in expr.code()
+  emit_push(FP, s);  // store the frame pointer
+  emit_move(FP, SP, s); // use FP to store the top stack
+}
+
+static void emit_after_method(int num, ostream &s) {
+  emit_load(RA, 2, FP, s); // load ra back
+  emit_load(FP, 1, FP, s); // load fp back
+  emit_addiu(SP, SP, num, s); // add formals stack, ra stack, fp stack back
+  emit_return(s);
+  env.exitscope();
+}
+
+static void emit_debug(ostream& s, int line_num) {
+#ifdef ENABLE_DEBUG
+  s << "#######debug in line: " << line_num << endl;
+#endif
+}
+
+static void emit_debug_map(ostream &s) {
+#ifdef ENABLE_DEBUG
+  s << "#Class attrs" << endl;
+  for (auto a : class_attr_offset_map) {
+    s << "#\tname: " << a.first << endl;
+    for (auto b : a.second) {
+      s << "#\t\t" << b.first << ": " << b.second << endl;
+    }
+  }
+
+  s << "#Class funcs" << endl;
+  for (auto a : class_func_offset_map) {
+    s << "#\tname: " << a.first << endl;
+    for (auto b : a.second) {
+      s << "#\t\t" << b.first << ": " << b.second << endl;
+    }
+  }
+#endif
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -887,9 +936,21 @@ void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
 
   s << WORD << name << DISPTAB_SUFFIX << endl;
   current_class_name = name;
-  dispatch_class_name = name;
   class_attr_offset_map[current_class_name] = {};
-  place_attr_list(s, table, 0);
+  //place_attr_list(s, table, 3);
+  if (!basic()) {
+    place_attr_list(s, table, 3);
+  } else if (name == Int) {
+    s << WORD << "0" << endl;
+  } else if (name == Str) {
+    s << WORD << "int_const0" << endl;
+    s << BYTE << "0" << endl;
+    s << ALIGN;
+  } else if (name == Bool) {
+    s << WORD << "0" << endl;
+  } else if (name == IO) {
+    s << WORD << "0" << endl;
+  }
 }
 
 void CgenNode::code_dispatch(ostream &s, CgenClassTable *table) {
@@ -902,35 +963,25 @@ void CgenNode::code_dispatch(ostream &s, CgenClassTable *table) {
 
 void CgenNode::code_init(ostream &s, CgenClassTable *table) {
   s << name << CLASSINIT_SUFFIX << LABEL;
-  attrs_init(s, table, DEFAULT_OBJFIELDS-1);
-  emit_return(s);
+  if (!basic()) {
+    emit_before_method(nullptr, s);
+    attrs_init(s, table, DEFAULT_OBJFIELDS);
+    emit_after_method(8, s);
+  } else {
+    emit_return(s);
+  }
 }
 
 void CgenNode::code_methods(ostream &s, CgenClassTable *table) {
   current_class_name = name;
+  dispatch_class_name = name;
   ITERATE_LIST_NODE(features) {
     auto f = dynamic_cast<method_class*>(features->nth(i));
     if (f != nullptr) {
-      curr_method = f;
-
-      env.enterscope();
-      func_obj_num = 0;
-
       s << name << METHOD_SEP << f->name << LABEL;
-
-      emit_push(RA, s); // the RA may change in expr.code()
-      emit_push(FP, s);  // store the frame pointer
-      emit_move(FP, SP, s); // use FP to store the top stack
-
+      emit_before_method(f, s);
       f->expr->code(s);
-
-      emit_load(RA, 2, FP, s); // load ra back
-      emit_load(FP, 1, FP, s); // load fp back
-      emit_addiu(SP, SP, 4*f->formals->len()+8+4*func_obj_num, s); // add formals stack, ra stack, fp stack back
-
-      emit_return(s);
-
-      env.exitscope();
+      emit_after_method(4*f->formals->len()+8, s);
     }
   }
 }
@@ -943,8 +994,7 @@ int CgenNode::place_attr_list(ostream &s, CgenClassTable *table, int offset) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
       s << WORD << "0" << endl;
-      class_attr_offset_map[current_class_name][f->name] = offset;
-      offset++;
+      class_attr_offset_map[current_class_name][f->name] = offset++;
     }
   }
   return offset;
@@ -958,8 +1008,7 @@ int CgenNode::place_method_list(ostream &s, CgenClassTable *table, int offset) {
     auto f = dynamic_cast<method_class*>(features->nth(i));
     if (f != nullptr) {
       s << WORD << name << METHOD_SEP << f->name << endl;
-      class_func_offset_map[current_class_name][f->name] = offset;
-      offset++;
+      class_func_offset_map[current_class_name][f->name] = offset++;
     }
   }
   return offset;
@@ -973,9 +1022,14 @@ int CgenNode::attrs_init(ostream &s, CgenClassTable *table, int attr_pos) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
       f->init->code(s);
-      emit_store(ACC, attr_pos, SELF, s);
 
-      attr_pos += 1;
+      if (dynamic_cast<no_expr_class*>(f->init)) {
+        emit_alloc_obj(f->type_decl, s);
+      } else {
+        f->init->code(s);
+      }
+
+      emit_store(ACC, attr_pos++, SELF, s);
     }
   }
   return attr_pos;
@@ -1057,7 +1111,6 @@ void CgenClassTable::code()
   code_nameTab();
   code_dispatch_tables();
 
-  if (cgen_debug) cout << "coding global text" << endl;
   code_global_text();
 
 //                 Add your code to emit
@@ -1066,7 +1119,7 @@ void CgenClassTable::code()
 //                   - etc...
   code_class_initializer();
   code_class_methods();
-
+  emit_debug_map(str);
 }
 
 
@@ -1126,7 +1179,20 @@ void dispatch_class::code(ostream &s) {
   dispatch_class_name = current_class_name;
 }
 
+#define COND(then_code, else_code) \
+  emit_beqz(ACC, label_num, s);    \
+  then_code;                       \
+  emit_branch(label_num+1, s);     \
+  emit_label_def(label_num++, s);  \
+  else_code;                       \
+  s << "#next fragment: " << endl; \
+  emit_label_def(label_num++, s);
+
 void cond_class::code(ostream &s) {
+  pred->code(s);
+  emit_load(ACC, BOOL_SLOTS, ACC, s);
+
+  COND(then_exp->code(s), else_exp->code(s));
 }
 
 void loop_class::code(ostream &s) {
@@ -1147,10 +1213,10 @@ void let_class::code(ostream &s) {
 
   init->code(s);
   emit_push(ACC, s);
-  env.addid(identifier, new int(func_obj_num));
+  env.addid(identifier, new int(func_obj_num++));
   //s << "before body->code()" << endl;
-  func_obj_num++;
   body->code(s);
+  emit_addiu(SP, SP, 4, s); // let stack back
 
   env.exitscope();
 }
@@ -1160,7 +1226,7 @@ void let_class::code(ostream &s) {
   emit_push(ACC, s);         \
   e2->code(s);               \
   emit_load(T1, 1, SP, s);   \
-  (OP)(ACC, ACC, T1, s);     \
+  OP(ACC, ACC, T1, s);     \
   emit_addiu(SP, SP, 4, s);
 
 void plus_class::code(ostream &s) {
@@ -1184,29 +1250,38 @@ void neg_class::code(ostream &s) {
   emit_neg(ACC, ACC, s);
 }
 
-#define COMPARE(cmd, s)  \
+#define COMPARE_ADDRESS(cmd, s)  \
   e1->code(s);              \
   emit_push(ACC, s);        \
   e2->code(s);              \
   emit_load(T1, 1, SP, s);  \
-  (s) << ("slt") << ACC << T1 << ACC << endl; \
-  emit_addiu(SP, SP, 4, s);
+  s << "\t" << cmd << " " << ACC << " " << T1 << " " << ACC << endl; \
+  emit_addiu(SP, SP, 4, s); \
+  COND(emit_load_address(ACC, TRUE_LA, s), emit_load_address(ACC, FALSE_LA, s));
 
 void lt_class::code(ostream &s) {
-  COMPARE("slt", s);
+  COMPARE_ADDRESS("slt", s);
 }
 
 void eq_class::code(ostream &s) {
-  COMPARE("seq", s);
+  if (e1->type == Str) {
+    // compare the content, which is the pointer to the str_const
+    // TODO, write the compare method of str
+    emit_load_address(ACC, TRUE_LA, s);
+  } else {
+    // compare the address
+    COMPARE_ADDRESS("seq", s);
+  }
+  emit_debug(s, get_line_number());
 }
 
 void leq_class::code(ostream &s) {
-  COMPARE("sleu", s);
+  COMPARE_ADDRESS("sleu", s);
 }
 
 void comp_class::code(ostream &s) {
   e1->code(s);
-  s << "not" << ACC << ACC << endl;
+  s << "not" << " " << ACC << " " << ACC << endl;
 }
 
 void int_const_class::code(ostream& s)  {
@@ -1225,9 +1300,12 @@ void bool_const_class::code(ostream& s) {
 }
 
 void new__class::code(ostream &s) {
+  emit_alloc_obj(type_name, s);
 }
 
 void isvoid_class::code(ostream &s) {
+  e1->code(s);
+  COND(emit_load_address(ACC, FALSE_LA, s), emit_load_address(ACC, TRUE_LA, s));
 }
 
 void no_expr_class::code(ostream &s) {
