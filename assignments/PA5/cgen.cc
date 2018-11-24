@@ -382,6 +382,11 @@ static void emit_push(char *reg, ostream& str)
   emit_addiu(SP,SP,-4,str);
 }
 
+static void emit_pop(char *reg, ostream& str) {
+  emit_load(reg,1,SP,str);
+  emit_addiu(SP,SP,4,str);
+}
+
 //
 // Fetch the integer value in an Int object.
 // Emits code to fetch the integer value of the Integer object pointed
@@ -415,13 +420,8 @@ static void emit_gc_check(char *source, ostream &s)
 }
 
 static void emit_alloc_obj(Symbol name, ostream &s) {
-  if (name == IO) {
-    s << "#init IO as void(0)" << endl;
-    emit_load_imm(ACC, 0, s);
-  } else {
-    s << LA << ACC << " " << name << PROTOBJ_SUFFIX << endl;
-    s << JAL << "Object.copy" << endl;
-  }
+  s << LA << ACC << " " << name << PROTOBJ_SUFFIX << endl;
+  s << JAL << "Object.copy" << endl;
 }
 
 static void emit_before_method(method_class *f, ostream &s) {
@@ -431,9 +431,11 @@ static void emit_before_method(method_class *f, ostream &s) {
   emit_push(RA, s); // the RA may change in expr.code()
   emit_push(FP, s);  // store the frame pointer
   emit_move(FP, SP, s); // use FP to store the top stack
+  s << endl;
 }
 
 static void emit_after_method(int num, ostream &s) {
+  s << endl;
   emit_load(RA, 2, FP, s); // load ra back
   emit_load(FP, 1, FP, s); // load fp back
   emit_addiu(SP, SP, num, s); // add formals stack, ra stack, fp stack back
@@ -441,9 +443,15 @@ static void emit_after_method(int num, ostream &s) {
   env.exitscope();
 }
 
-static void emit_debug(ostream& s, int line_num) {
+static void emit_debug_line_num(int line_num, ostream &s) {
 #ifdef ENABLE_DEBUG
   s << "#######debug in line: " << line_num << endl;
+#endif
+}
+
+static void emit_debug_symbol(Symbol name, ostream &s) {
+#ifdef ENABLE_DEBUG
+  s << "#######debug symbol: " << name << endl;
 #endif
 }
 
@@ -1037,14 +1045,16 @@ int CgenNode::attrs_init(ostream &s, CgenClassTable *table, int attr_pos) {
   ITERATE_LIST_NODE(features) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
-      f->init->code(s);
-
       if (dynamic_cast<no_expr_class*>(f->init)) {
-        emit_alloc_obj(f->type_decl, s);
+        if (f->type_decl == Int ||
+            f->type_decl == Str ||
+            f->type_decl == Bool)
+          emit_alloc_obj(f->type_decl, s);
+        else
+          emit_load_imm(ACC, 0, s);
       } else {
         f->init->code(s);
       }
-
       emit_store(ACC, attr_pos++, SELF, s);
     }
   }
@@ -1181,6 +1191,10 @@ void static_dispatch_class::code(ostream &s) {
 
 void dispatch_class::code(ostream &s) {
   expr->code(s);
+  if (expr->type != SELF_TYPE && expr->type != self) {
+    emit_push(SELF, s);
+    emit_move(SELF, ACC, s);
+  }
   ITERATE_LIST_NODE(actual) {
     auto a = actual->nth(i);
     a->code(s);
@@ -1192,6 +1206,8 @@ void dispatch_class::code(ostream &s) {
 
   dispatch_class_name = expr->type;
   emit_jalr(T1, s);
+  if (expr->type != SELF_TYPE && expr->type != self)
+    emit_pop(SELF, s);
   dispatch_class_name = current_class_name;
 }
 
@@ -1292,7 +1308,7 @@ void eq_class::code(ostream &s) {
     // compare the address
     COMPARE_ADDRESS("seq", s);
   }
-  emit_debug(s, get_line_number());
+  emit_debug_line_num(get_line_number(), s);
 }
 
 void leq_class::code(ostream &s) {
