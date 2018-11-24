@@ -217,6 +217,18 @@ static void emit_load_imm(char *dest_reg, int val, ostream& s)
 static void emit_load_address(char *dest_reg, char *address, ostream& s)
 { s << LA << dest_reg << " " << address << endl; }
 
+static void emit_load_intval(char *dest_reg, char *source_reg, ostream& s) {
+  emit_load(dest_reg, INT_SLOTS, source_reg, s);
+}
+
+static void emit_load_boolval(char *dest_reg, char *source_reg, ostream& s) {
+  emit_load(dest_reg, BOOL_SLOTS, source_reg, s);
+}
+
+static void emit_load_strval(char *dest_reg, char *source_reg, ostream& s) {
+  emit_load(dest_reg, STRING_SLOTS, source_reg, s);
+}
+
 static void emit_partial_load_address(char *dest_reg, ostream& s)
 { s << LA << dest_reg << " "; }
 
@@ -1190,7 +1202,7 @@ void dispatch_class::code(ostream &s) {
 
 void cond_class::code(ostream &s) {
   pred->code(s);
-  emit_load(ACC, BOOL_SLOTS, ACC, s);
+  emit_load_boolval(ACC, ACC, s);
 
   COND(then_exp->code(s), else_exp->code(s));
 }
@@ -1257,7 +1269,7 @@ void neg_class::code(ostream &s) {
   emit_load(T1, 1, SP, s);  \
   s << "\t" << cmd << " " << ACC << " " << T1 << " " << ACC << endl; \
   emit_addiu(SP, SP, 4, s); \
-  COND(emit_load_address(ACC, TRUE_LA, s), emit_load_address(ACC, FALSE_LA, s));
+  COND(emit_load_bool(ACC, truebool, s), emit_load_bool(ACC, falsebool, s));
 
 void lt_class::code(ostream &s) {
   COMPARE_ADDRESS("slt", s);
@@ -1267,7 +1279,7 @@ void eq_class::code(ostream &s) {
   if (e1->type == Str) {
     // compare the content, which is the pointer to the str_const
     // TODO, write the compare method of str
-    emit_load_address(ACC, TRUE_LA, s);
+    emit_load_bool(ACC, truebool, s);
   } else {
     // compare the address
     COMPARE_ADDRESS("seq", s);
@@ -1305,7 +1317,7 @@ void new__class::code(ostream &s) {
 
 void isvoid_class::code(ostream &s) {
   e1->code(s);
-  COND(emit_load_address(ACC, FALSE_LA, s), emit_load_address(ACC, TRUE_LA, s));
+  COND(emit_load_bool(ACC, falsebool, s), emit_load_bool(ACC, truebool, s));
 }
 
 void no_expr_class::code(ostream &s) {

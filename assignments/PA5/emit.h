@@ -53,8 +53,8 @@
 #define SIZE_OFFSET 1
 #define DISPTABLE_OFFSET 2
 
-#define STRING_SLOTS      1
-#define INT_SLOTS         1
+#define STRING_SLOTS      3
+#define INT_SLOTS         3
 #define BOOL_SLOTS        3
 
 #define GLOBAL        "\t.globl\t"
@@ -62,8 +62,6 @@
 #define WORD          "\t.word\t"
 #define BYTE          "\t.byte\t"
 
-#define TRUE_LA    "bool_const1 #true"
-#define FALSE_LA   "bool_const0 #false"
 
 //
 // register names
