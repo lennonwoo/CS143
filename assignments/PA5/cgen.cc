@@ -1190,15 +1190,18 @@ void static_dispatch_class::code(ostream &s) {
 }
 
 void dispatch_class::code(ostream &s) {
-  expr->code(s);
-  if (expr->type != SELF_TYPE && expr->type != self) {
-    emit_push(SELF, s);
-    emit_move(SELF, ACC, s);
-  }
+  emit_push(SELF, s);
+
   ITERATE_LIST_NODE(actual) {
     auto a = actual->nth(i);
     a->code(s);
     emit_push(ACC, s);
+  }
+
+  expr->code(s);
+  if (expr->type != SELF_TYPE && expr->type != self) {
+    emit_move(SELF, ACC, s);
+    s << endl;
   }
 
   emit_load(T2, DEFAULT_OBJFIELDS-1, SELF, s);
@@ -1206,9 +1209,10 @@ void dispatch_class::code(ostream &s) {
 
   dispatch_class_name = expr->type;
   emit_jalr(T1, s);
-  if (expr->type != SELF_TYPE && expr->type != self)
-    emit_pop(SELF, s);
   dispatch_class_name = current_class_name;
+
+  s << endl;
+  emit_pop(SELF, s);
 }
 
 #define COND(then_code, else_code) \
