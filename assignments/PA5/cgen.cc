@@ -221,6 +221,10 @@ static void emit_load_intval(char *dest_reg, char *source_reg, ostream& s) {
   emit_load(dest_reg, INT_SLOTS, source_reg, s);
 }
 
+static void emit_store_intval(char *source_reg, char *dest_reg, ostream& s) {
+  emit_store(source_reg, INT_SLOTS, dest_reg, s);
+}
+
 static void emit_load_boolval(char *dest_reg, char *source_reg, ostream& s) {
   emit_load(dest_reg, BOOL_SLOTS, source_reg, s);
 }
@@ -1233,12 +1237,16 @@ void let_class::code(ostream &s) {
   env.exitscope();
 }
 
-#define ARITHMETIC(OP)       \
-  e1->code(s);               \
-  emit_push(ACC, s);         \
-  e2->code(s);               \
-  emit_load(T1, 1, SP, s);   \
-  OP(ACC, ACC, T1, s);     \
+#define ARITHMETIC(OP)           \
+  e1->code(s);                   \
+  emit_push(ACC, s);             \
+  e2->code(s);                   \
+  emit_load(T1, 1, SP, s);       \
+  emit_load_intval(T1, T1, s);   \
+  emit_load_intval(ACC, ACC, s); \
+  OP(T2, ACC, T1, s);            \
+  emit_alloc_obj(Int, s);        \
+  emit_store_intval(T2, ACC, s); \
   emit_addiu(SP, SP, 4, s);
 
 void plus_class::code(ostream &s) {
