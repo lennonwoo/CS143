@@ -1264,7 +1264,7 @@ void let_class::code(ostream &s) {
   emit_load(T1, 1, SP, s);       \
   emit_load_intval(T1, T1, s);   \
   emit_load_intval(ACC, ACC, s); \
-  OP(T2, ACC, T1, s);            \
+  OP(T2, T1, ACC, s);            \
   emit_alloc_obj(Int, s);        \
   emit_store_intval(T2, ACC, s); \
   emit_addiu(SP, SP, 4, s);
