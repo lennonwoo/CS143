@@ -53,9 +53,9 @@
 #define SIZE_OFFSET 1
 #define DISPTABLE_OFFSET 2
 
-#define STRING_SLOTS      3
-#define INT_SLOTS         3
-#define BOOL_SLOTS        3
+#define STRING_SLOTS      1
+#define INT_SLOTS         1
+#define BOOL_SLOTS        1
 
 #define GLOBAL        "\t.globl\t"
 #define ALIGN         "\t.align\t2\n"

@@ -222,19 +222,15 @@ static void emit_load_address(char *dest_reg, char *address, ostream& s)
 { s << LA << dest_reg << " " << address << endl; }
 
 static void emit_load_intval(char *dest_reg, char *source_reg, ostream& s) {
-  emit_load(dest_reg, INT_SLOTS, source_reg, s);
+  emit_load(dest_reg, DEFAULT_OBJFIELDS, source_reg, s);
 }
 
 static void emit_store_intval(char *source_reg, char *dest_reg, ostream& s) {
-  emit_store(source_reg, INT_SLOTS, dest_reg, s);
+  emit_store(source_reg, DEFAULT_OBJFIELDS, dest_reg, s);
 }
 
 static void emit_load_boolval(char *dest_reg, char *source_reg, ostream& s) {
-  emit_load(dest_reg, BOOL_SLOTS, source_reg, s);
-}
-
-static void emit_load_strval(char *dest_reg, char *source_reg, ostream& s) {
-  emit_load(dest_reg, STRING_SLOTS, source_reg, s);
+  emit_load(dest_reg, DEFAULT_OBJFIELDS, source_reg, s);
 }
 
 static void emit_partial_load_address(char *dest_reg, ostream& s)
@@ -747,6 +743,9 @@ void CgenClassTable::code_constants()
 CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 {
    classTagIndex =  0;
+   stringclasstag = getTag(Str);
+   intclasstag = getTag(Int);
+   boolclasstag = getTag(Bool);
 
    enterscope();
    if (cgen_debug) cout << "Building CgenClassTable" << endl;
@@ -957,26 +956,34 @@ int CgenNode::get_attr_size() {
 }
 
 void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
+  int obj_size = DEFAULT_OBJFIELDS;
+  if (!basic()) {
+    obj_size = obj_size + get_attr_size();
+  } else if (name == Str) {
+    obj_size = obj_size + STRING_SLOTS + 1; // 1 mean remain size
+  } else if (name == Int ||
+             name == Bool) {
+    obj_size = obj_size + INT_SLOTS;
+  } else {
+    // IO
+    obj_size = obj_size;
+  }
+
   s << WORD << "-1" << endl;
   s << name << PROTOBJ_SUFFIX << LABEL
-      << WORD << table->getTag(this) << endl
-      << WORD << (DEFAULT_OBJFIELDS + get_attr_size()) << endl;
-
+    << WORD << table->getTag(this) << endl
+    << WORD << obj_size << endl;
   s << WORD << name << DISPTAB_SUFFIX << endl;
+
   curr_class_name = name;
-  class_attr_offset_map[curr_class_name] = {};
-  //place_attr_list(s, table, 3);
   if (!basic()) {
     place_attr_list(s, table, 3);
-  } else if (name == Int) {
-    s << WORD << "0" << endl;
   } else if (name == Str) {
-    s << WORD << "int_const0" << endl;
+    s << WORD; inttable.lookup_string("0")->code_ref(s); s << endl;
     s << BYTE << "0" << endl;
     s << ALIGN;
-  } else if (name == Bool) {
-    s << WORD << "0" << endl;
-  } else if (name == IO) {
+  } else if (name == Int ||
+          name == Bool) {
     s << WORD << "0" << endl;
   }
 }
@@ -985,7 +992,6 @@ void CgenNode::code_dispatch(ostream &s, CgenClassTable *table) {
   s << name << DISPTAB_SUFFIX << LABEL;
 
   curr_class_name = name;
-  class_func_offset_map[curr_class_name] = {};
   place_method_list(s, table, 0);
 }
 
@@ -1022,6 +1028,8 @@ int CgenNode::place_attr_list(ostream &s, CgenClassTable *table, int offset) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
       s << WORD << "0" << endl;
+      // NOTICE: do not use name, it is recursive function
+      // we need to assign curr_class_name
       class_attr_offset_map[curr_class_name][f->name] = offset++;
     }
   }
@@ -1067,10 +1075,10 @@ int CgenClassTable::getTag(Symbol s) {
   if (it != symbolTagMap.end()) {
     return it->second;
   } else {
-    symbolTagMap[s] = classTagIndex;
+    int assignTag = classTagIndex++;
+    symbolTagMap[s] = assignTag;
     symbolTabList.push_back(s);
-    classTagIndex++;
-    return classTagIndex - 1;
+    return assignTag;
   }
 }
 
