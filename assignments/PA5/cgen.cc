@@ -1325,35 +1325,34 @@ void neg_class::code(ostream &s) {
   emit_neg(ACC, ACC, s);
 }
 
-#define COMPARE_ADDRESS(cmd, s)  \
+#define COMPARE_VALUE(op, s)  \
   e1->code(s);              \
   emit_push(ACC, s);        \
   e2->code(s);              \
   emit_load(T1, 1, SP, s);  \
   emit_load_intval(T1, T1, s);   \
   emit_load_intval(ACC, ACC, s); \
-  s << "\t" << cmd << " " << ACC << " " << T1 << " " << ACC << endl; \
+  s << "\t" << op << " " << ACC << " " << T1 << " " << ACC << endl; \
   emit_addiu(SP, SP, 4, s); \
   COND(emit_load_bool(ACC, truebool, s), emit_load_bool(ACC, falsebool, s));
 
 void lt_class::code(ostream &s) {
-  COMPARE_ADDRESS("slt", s);
+  COMPARE_VALUE("slt", s);
 }
 
 void eq_class::code(ostream &s) {
-  if (e1->type == Str) {
-    // compare the content, which is the pointer to the str_const
-    // TODO, write the compare method of str
-    emit_load_bool(ACC, truebool, s);
-  } else {
-    // compare the address
-    COMPARE_ADDRESS("seq", s);
-  }
-  emit_debug_line_num(get_line_number(), s);
+  e1->code(s);
+  emit_push(ACC, s);
+  e2->code(s);
+  emit_move(T2, ACC, s);
+  emit_pop(T1, s);
+  emit_load_bool(ACC, truebool, s);
+  emit_load_bool(A1, falsebool, s);
+  emit_jal("equality_test", s);
 }
 
 void leq_class::code(ostream &s) {
-  COMPARE_ADDRESS("sleu", s);
+  COMPARE_VALUE("sleu", s);
 }
 
 void comp_class::code(ostream &s) {
