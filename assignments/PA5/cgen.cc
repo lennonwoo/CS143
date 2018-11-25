@@ -1232,6 +1232,20 @@ void cond_class::code(ostream &s) {
 }
 
 void loop_class::code(ostream &s) {
+  s << endl;
+  s << "#loop start: " << endl;
+
+  emit_label_def(label_num++, s);
+  pred->code(s);
+  emit_load_boolval(ACC, ACC, s); // like cond_class the pred expr return the boolean object
+  emit_beqz(ACC, label_num, s); // chech acc if need jump to next fragment
+  body->code(s);
+  emit_branch(label_num-1, s); // jump back to the pred code
+  s << "#next fragment: " << endl;
+  emit_label_def(label_num++, s);
+
+  s << "#loop ended: " << endl;
+  s << endl;
 }
 
 void typcase_class::code(ostream &s) {
