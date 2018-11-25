@@ -1227,13 +1227,15 @@ void dispatch_class::code(ostream &s) {
 }
 
 #define COND(then_code, else_code) \
-  emit_beqz(ACC, label_num, s);    \
+  int else_label = label_num++;    \
+  int next_label = label_num++;    \
+  emit_beqz(ACC, else_label, s);   \
   then_code;                       \
-  emit_branch(label_num+1, s);     \
-  emit_label_def(label_num++, s);  \
+  emit_branch(next_label, s);      \
+  emit_label_def(else_label, s);   \
   else_code;                       \
-  s << "#next fragment: " << endl; \
-  emit_label_def(label_num++, s);
+  s << "#bool next fragment: " << endl; \
+  emit_label_def(next_label, s);
 
 void cond_class::code(ostream &s) {
   pred->code(s);
@@ -1246,14 +1248,17 @@ void loop_class::code(ostream &s) {
   s << endl;
   s << "#loop start: " << endl;
 
-  emit_label_def(label_num++, s);
+  int start_label = label_num++;
+  int next_label = label_num++;
+
+  emit_label_def(start_label, s);
   pred->code(s);
   emit_load_boolval(ACC, ACC, s); // like cond_class the pred expr return the boolean object
-  emit_beqz(ACC, label_num, s); // chech acc if need jump to next fragment
+  emit_beqz(ACC, next_label, s); // chech acc if need jump to next fragment
   body->code(s);
-  emit_branch(label_num-1, s); // jump back to the pred code
-  s << "#next fragment: " << endl;
-  emit_label_def(label_num++, s);
+  emit_branch(start_label, s);
+  s << "#loop next fragment: " << endl;
+  emit_label_def(next_label, s);
 
   s << "#loop ended: " << endl;
   s << endl;
@@ -1283,6 +1288,8 @@ void let_class::code(ostream &s) {
   emit_addiu(SP, SP, 4, s); // let stack back
 
   env.exitscope();
+  s << "#let ended: " << endl;
+  s << endl;
 }
 
 #define ARITHMETIC(OP)           \
