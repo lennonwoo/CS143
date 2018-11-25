@@ -138,7 +138,11 @@ int get_attr_offset(Symbol attr_name) {
     dispatch_class_name = current_class_name;
   }
 
-  return class_attr_offset_map[dispatch_class_name][attr_name];
+  auto map = class_attr_offset_map[dispatch_class_name];
+  if (map.find(attr_name) != map.end())
+    return map[attr_name];
+  else
+      return -1;
 }
 
 int get_env_offset(Symbol name) {
@@ -1181,15 +1185,28 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 //
 //*****************************************************************
 
+#define OP_SYMBOL(op)                                     \
+  int offset;                                             \
+  if ((offset = get_attr_offset(name)) != -1) {           \
+    op(ACC, offset, SELF, s);                             \
+  } else if ((offset = get_formal_offset(name)) != -1) {  \
+    op(ACC, offset, FP, s);                               \
+  } else if ((offset = get_env_offset(name)) != -1) {     \
+    op(ACC, -offset, FP, s);                              \
+  }
+
 void assign_class::code(ostream &s) {
   expr->code(s);
-  emit_store(ACC, -get_env_offset(name), FP, s);
+
+  OP_SYMBOL(emit_store);
 }
 
 void static_dispatch_class::code(ostream &s) {
 }
 
 void dispatch_class::code(ostream &s) {
+  s << endl;
+  s << "#dispatch start: " << endl;
   emit_push(SELF, s);
 
   ITERATE_LIST_NODE(actual) {
@@ -1213,6 +1230,8 @@ void dispatch_class::code(ostream &s) {
 
   s << endl;
   emit_pop(SELF, s);
+  s << "#dispatch ended: " << endl;
+  s << endl;
 }
 
 #define COND(then_code, else_code) \
@@ -1309,6 +1328,8 @@ void neg_class::code(ostream &s) {
   emit_push(ACC, s);        \
   e2->code(s);              \
   emit_load(T1, 1, SP, s);  \
+  emit_load_intval(T1, T1, s);   \
+  emit_load_intval(ACC, ACC, s); \
   s << "\t" << cmd << " " << ACC << " " << T1 << " " << ACC << endl; \
   emit_addiu(SP, SP, 4, s); \
   COND(emit_load_bool(ACC, truebool, s), emit_load_bool(ACC, falsebool, s));
@@ -1366,17 +1387,10 @@ void no_expr_class::code(ostream &s) {
 }
 
 void object_class::code(ostream &s) {
-  int offset;
-
-  if (name == self || name == SELF_TYPE)
-    return;
-
-  if ((offset = get_env_offset(name)) != -1) {
-    emit_load(ACC, -offset, FP, s);
-  } else if ((offset = get_formal_offset(name)) != -1) {
-    emit_load(ACC, offset, FP, s);
+  if (name == self || name == SELF_TYPE) {
+    emit_move(ACC, SELF, s);
   } else {
-    emit_load(ACC, get_attr_offset(name), SELF, s);
+    OP_SYMBOL(emit_load);
   }
 }
 
