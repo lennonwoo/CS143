@@ -27,7 +27,7 @@
 
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
-Symbol current_class_name, dispatch_class_name;
+Symbol curr_class_name, dispatch_class_name, curr_type;
 std::map<Symbol, std::map<Symbol, int> > class_func_offset_map;
 std::map<Symbol, std::map<Symbol, int> > class_attr_offset_map;
 SymbolTable<Symbol, int> env;
@@ -127,7 +127,7 @@ BoolConst truebool(TRUE);
 // code generation help function
 int get_func_offset(Symbol class_name, Symbol func_name) {
   if (class_name == SELF_TYPE) {
-    class_name = current_class_name;
+    class_name = curr_class_name;
   }
 
   return class_func_offset_map[class_name][func_name];
@@ -135,7 +135,7 @@ int get_func_offset(Symbol class_name, Symbol func_name) {
 
 int get_attr_offset(Symbol attr_name) {
   if (dispatch_class_name == SELF_TYPE) {
-    dispatch_class_name = current_class_name;
+    dispatch_class_name = curr_class_name;
   }
 
   auto map = class_attr_offset_map[dispatch_class_name];
@@ -963,8 +963,8 @@ void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
       << WORD << (DEFAULT_OBJFIELDS + get_attr_size()) << endl;
 
   s << WORD << name << DISPTAB_SUFFIX << endl;
-  current_class_name = name;
-  class_attr_offset_map[current_class_name] = {};
+  curr_class_name = name;
+  class_attr_offset_map[curr_class_name] = {};
   //place_attr_list(s, table, 3);
   if (!basic()) {
     place_attr_list(s, table, 3);
@@ -984,8 +984,8 @@ void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
 void CgenNode::code_dispatch(ostream &s, CgenClassTable *table) {
   s << name << DISPTAB_SUFFIX << LABEL;
 
-  current_class_name = name;
-  class_func_offset_map[current_class_name] = {};
+  curr_class_name = name;
+  class_func_offset_map[curr_class_name] = {};
   place_method_list(s, table, 0);
 }
 
@@ -1001,7 +1001,7 @@ void CgenNode::code_init(ostream &s, CgenClassTable *table) {
 }
 
 void CgenNode::code_methods(ostream &s, CgenClassTable *table) {
-  current_class_name = name;
+  curr_class_name = name;
   dispatch_class_name = name;
   ITERATE_LIST_NODE(features) {
     auto f = dynamic_cast<method_class*>(features->nth(i));
@@ -1022,7 +1022,7 @@ int CgenNode::place_attr_list(ostream &s, CgenClassTable *table, int offset) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
       s << WORD << "0" << endl;
-      class_attr_offset_map[current_class_name][f->name] = offset++;
+      class_attr_offset_map[curr_class_name][f->name] = offset++;
     }
   }
   return offset;
@@ -1036,7 +1036,7 @@ int CgenNode::place_method_list(ostream &s, CgenClassTable *table, int offset) {
     auto f = dynamic_cast<method_class*>(features->nth(i));
     if (f != nullptr) {
       s << WORD << name << METHOD_SEP << f->name << endl;
-      class_func_offset_map[current_class_name][f->name] = offset++;
+      class_func_offset_map[curr_class_name][f->name] = offset++;
     }
   }
   return offset;
@@ -1049,16 +1049,8 @@ int CgenNode::attrs_init(ostream &s, CgenClassTable *table, int attr_pos) {
   ITERATE_LIST_NODE(features) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
-      if (dynamic_cast<no_expr_class*>(f->init)) {
-        if (f->type_decl == Int ||
-            f->type_decl == Str ||
-            f->type_decl == Bool)
-          emit_alloc_obj(f->type_decl, s);
-        else
-          emit_load_imm(ACC, 0, s);
-      } else {
-        f->init->code(s);
-      }
+      curr_type = f->type_decl;
+      f->init->code(s);
       emit_store(ACC, attr_pos++, SELF, s);
     }
   }
@@ -1226,7 +1218,7 @@ void dispatch_class::code(ostream &s) {
 
   dispatch_class_name = expr->type;
   emit_jalr(T1, s);
-  dispatch_class_name = current_class_name;
+  dispatch_class_name = curr_class_name;
 
   s << endl;
   emit_pop(SELF, s);
@@ -1278,8 +1270,11 @@ void block_class::code(ostream &s) {
 }
 
 void let_class::code(ostream &s) {
+  s << endl;
+  s << "#let start: " << endl;
   env.enterscope();
 
+  curr_type = type_decl;
   init->code(s);
   emit_push(ACC, s);
   env.addid(identifier, new int(func_obj_num++));
@@ -1384,6 +1379,12 @@ void isvoid_class::code(ostream &s) {
 }
 
 void no_expr_class::code(ostream &s) {
+  if (curr_type == Int ||
+      curr_type == Str ||
+      curr_type == Bool)
+    emit_alloc_obj(curr_type, s);
+  else
+    emit_load_imm(ACC, 0, s);
 }
 
 void object_class::code(ostream &s) {
