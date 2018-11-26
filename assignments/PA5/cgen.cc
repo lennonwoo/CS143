@@ -387,6 +387,19 @@ static void emit_pop(char *reg, ostream& str) {
   emit_addiu(SP,SP,4,str);
 }
 
+static void emit_delete_env(ostream& str) {
+  emit_addiu(SP, SP, 4, str);
+  func_obj_num--;
+  env.exitscope();
+}
+
+static void emit_add_env(Symbol name, ostream& str) {
+  env.enterscope();
+  emit_push(ACC, str);
+  env.addid(name, new int(func_obj_num++));
+}
+
+
 //
 // Fetch the integer value in an Int object.
 // Emits code to fetch the integer value of the Integer object pointed
@@ -1273,6 +1286,60 @@ void loop_class::code(ostream &s) {
 }
 
 void typcase_class::code(ostream &s) {
+  s << endl;
+  s << "#case start: " << endl;
+
+  expr->code(s); // store the obj address, for compare it's tag
+  int next_label = label_num++;
+  int error_none = label_num++;
+  int error_void = label_num++;
+
+  std::map<int, int> cur_case_label_map, next_case_label_map;
+  for (int i=0; i<cases->len(); i++) {
+    cur_case_label_map[i] = label_num++;
+    if (i == cases->len()-1) {
+      next_case_label_map[i] = error_none;
+    } else {
+      next_case_label_map[i] = cur_case_label_map[i] + 1;
+    }
+  }
+
+  // 1. first check if expr return address is void
+  emit_beqz(ACC, error_void, s);
+
+  // 2. check if case match
+  ITERATE_LIST_NODE(cases) {
+    auto b = dynamic_cast<branch_class*>(cases->nth(i));
+
+    emit_label_def(cur_case_label_map[i], s);
+
+    s << LA << " " T1 << " " << b->type_decl << PROTOBJ_SUFFIX << endl;
+    emit_load(T1, TAG_OFFSET, T1, s);
+    emit_load(T2, TAG_OFFSET, ACC, s); // acc seems don't change in case compare
+    emit_bne(T1, T2, next_case_label_map[i], s);
+
+    emit_add_env(b->name, s);
+    b->expr->code(s);
+    emit_delete_env(s);
+    emit_branch(next_label, s);
+  }
+
+  // 3. put error_none at there, in case the cases.len() is 0
+  s << "#case error none: " << endl;
+  emit_label_def(error_none, s);
+  emit_jal(CASE_ERROR_NONE, s);
+
+  s << "#case error void: " << endl;
+  emit_label_def(error_void, s);
+  emit_load_imm(T1, get_line_number(), s);
+  emit_load_address(ACC, "str_const0", s); // seem that str_const0 put the raw file name
+  emit_jal(CASE_ERROR_VOID, s);
+
+  s << "#case next fragment: " << endl;
+  emit_label_def(next_label, s);
+
+  s << "#case ended: " << endl;
+  s << endl;
 }
 
 void block_class::code(ostream &s) {
@@ -1285,17 +1352,13 @@ void block_class::code(ostream &s) {
 void let_class::code(ostream &s) {
   s << endl;
   s << "#let start: " << endl;
-  env.enterscope();
 
   curr_type = type_decl;
   init->code(s);
-  emit_push(ACC, s);
-  env.addid(identifier, new int(func_obj_num++));
-  //s << "before body->code()" << endl;
+  emit_add_env(identifier, s);
   body->code(s);
-  emit_addiu(SP, SP, 4, s); // let stack back
+  emit_delete_env(s);
 
-  env.exitscope();
   s << "#let ended: " << endl;
   s << endl;
 }
