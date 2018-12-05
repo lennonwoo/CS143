@@ -28,8 +28,8 @@
 extern void emit_string_constant(ostream& str, char *s);
 extern int cgen_debug;
 Symbol curr_class_name, dispatch_class_name, curr_type;
-std::map<Symbol, std::map<Symbol, int> > class_func_offset_map;
-std::map<Symbol, std::map<Symbol, int> > class_attr_offset_map;
+std::map<Symbol, MethodList*> class_method_list_map;
+std::map<Symbol, AttrList*> class_attr_list_map;
 SymbolTable<Symbol, int> env;
 int func_obj_num, label_num;
 method_class *curr_method = nullptr;
@@ -130,7 +130,14 @@ int get_func_offset(Symbol class_name, Symbol func_name) {
     class_name = curr_class_name;
   }
 
-  return class_func_offset_map[class_name][func_name];
+  MethodList *list = class_method_list_map[class_name];
+  ITERATE_LIST_REVERSE(list) {
+    Method m = (*list)[i];
+    if (func_name == m.second) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 int get_attr_offset(Symbol attr_name) {
@@ -138,11 +145,14 @@ int get_attr_offset(Symbol attr_name) {
     dispatch_class_name = curr_class_name;
   }
 
-  auto map = class_attr_offset_map[dispatch_class_name];
-  if (map.find(attr_name) != map.end())
-    return map[attr_name];
-  else
-      return -1;
+  AttrList *list = class_attr_list_map[dispatch_class_name];
+  ITERATE_LIST(list) {
+    Attr a = (*list)[i];
+    if (attr_name == a) {
+      return i + 3;
+    }
+  }
+  return -1;
 }
 
 int get_env_offset(Symbol name) {
@@ -159,6 +169,24 @@ int get_formal_offset(Symbol name) {
     auto f = dynamic_cast<formal_class*>(curr_method->formals->nth(i));
     if (f->name == name)
       return (curr_method->formals->len()-i) + 2;
+  }
+  return -1;
+}
+
+int symbol_in_method_list(Symbol symbol, MethodList &method_list) {
+  for (int i = 0; i < method_list.size(); i++) {
+    if (method_list[i].second == symbol) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+int symbol_in_attr_list(Symbol symbol, AttrList &attr_list) {
+  for (int i = 0; i < attr_list.size(); i++) {
+    if (attr_list[i] == symbol) {
+      return i;
+    }
   }
   return -1;
 }
@@ -471,18 +499,22 @@ static void emit_debug_symbol(Symbol name, ostream &s) {
 static void emit_debug_map(ostream &s) {
 #ifdef ENABLE_DEBUG
   s << "#Class attrs" << endl;
-  for (auto a : class_attr_offset_map) {
+  for (auto a : class_attr_list_map) {
     s << "#\tname: " << a.first << endl;
-    for (auto b : a.second) {
-      s << "#\t\t" << b.first << ": " << b.second << endl;
+    auto list = a.second;
+    ITERATE_LIST(list) {
+      Attr a = (*list)[i];
+      s << "#\t\t" << a << ": " << i << endl;
     }
   }
 
   s << "#Class funcs" << endl;
-  for (auto a : class_func_offset_map) {
+  for (auto a : class_method_list_map) {
     s << "#\tname: " << a.first << endl;
-    for (auto b : a.second) {
-      s << "#\t\t" << b.first << ": " << b.second << endl;
+    auto list = a.second;
+    ITERATE_LIST(list) {
+      Method m = (*list)[i];
+      s << "#\t\t" << m.first << METHOD_SEP << m.second << ": " << i << endl;
     }
   }
 #endif
@@ -988,9 +1020,13 @@ void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
     << WORD << obj_size << endl;
   s << WORD << name << DISPTAB_SUFFIX << endl;
 
-  curr_class_name = name;
   if (!basic()) {
-    place_attr_list(s, table, 3);
+    AttrList *attr_list = new AttrList();
+    class_attr_list_map[name] = attr_list;
+    collect_attr_list(s, table, *attr_list);
+    ITERATE_LIST(attr_list) {
+      s << WORD << "0" << endl;
+    }
   } else if (name == Str) {
     s << WORD; inttable.lookup_string("0")->code_ref(s); s << endl;
     s << BYTE << "0" << endl;
@@ -1004,8 +1040,14 @@ void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
 void CgenNode::code_dispatch(ostream &s, CgenClassTable *table) {
   s << name << DISPTAB_SUFFIX << LABEL;
 
-  curr_class_name = name;
-  place_method_list(s, table, 0);
+  MethodList *method_list = new MethodList();
+  class_method_list_map[name] = method_list;
+  collect_method_list(s, table, *method_list);
+
+  ITERATE_LIST(method_list) {
+    Method m = (*method_list)[i];
+    s << WORD << m.first << METHOD_SEP << m.second << endl;
+  }
 }
 
 void CgenNode::code_init(ostream &s, CgenClassTable *table) {
@@ -1033,34 +1075,39 @@ void CgenNode::code_methods(ostream &s, CgenClassTable *table) {
   }
 }
 
-int CgenNode::place_attr_list(ostream &s, CgenClassTable *table, int offset) {
+void CgenNode::collect_attr_list(ostream &s, CgenClassTable *table, AttrList &attr_list) {
   if (parentnd != nullptr)
-    offset = parentnd->place_attr_list(s, table, offset);
+    parentnd->collect_attr_list(s, table, attr_list);
 
   ITERATE_LIST_NODE(features) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
-      s << WORD << "0" << endl;
-      // NOTICE: do not use name, it is recursive function
-      // we need to assign curr_class_name
-      class_attr_offset_map[curr_class_name][f->name] = offset++;
+      int offset;
+      if ((offset = symbol_in_attr_list(f->name, attr_list) )== -1) {
+        attr_list.push_back(f->name);
+      } else {
+        attr_list[offset] = f->name;
+      }
     }
   }
-  return offset;
 }
 
-int CgenNode::place_method_list(ostream &s, CgenClassTable *table, int offset) {
+void CgenNode::collect_method_list(ostream &s, CgenClassTable *table, MethodList &method_list) {
   if (parentnd != nullptr)
-    offset = parentnd->place_method_list(s, table, offset);
+    parentnd->collect_method_list(s, table, method_list);
 
   ITERATE_LIST_NODE(features) {
     auto f = dynamic_cast<method_class*>(features->nth(i));
     if (f != nullptr) {
-      s << WORD << name << METHOD_SEP << f->name << endl;
-      class_func_offset_map[curr_class_name][f->name] = offset++;
+      int offset;
+      Method m(name, f->name);
+      if ((offset = symbol_in_method_list(f->name, method_list) )== -1) {
+        method_list.push_back(m);
+      } else {
+        method_list[offset] = m;
+      }
     }
   }
-  return offset;
 }
 
 int CgenNode::attrs_init(ostream &s, CgenClassTable *table, int attr_pos) {
@@ -1160,9 +1207,9 @@ void CgenClassTable::code()
 //                   - object initializer
 //                   - the class methods
 //                   - etc...
+  emit_debug_map(str);
   code_class_initializer();
   code_class_methods();
-  emit_debug_map(str);
 }
 
 
@@ -1219,7 +1266,7 @@ void static_dispatch_class::code(ostream &s) {
 
 void dispatch_class::code(ostream &s) {
   s << endl;
-  s << "#dispatch start: " << endl;
+  s << "#dispatch start: " << name << endl;
   emit_push(SELF, s);
 
   ITERATE_LIST_NODE(actual) {
@@ -1235,6 +1282,8 @@ void dispatch_class::code(ostream &s) {
   }
 
   emit_load(T2, DEFAULT_OBJFIELDS-1, SELF, s);
+  s << "#type: " << expr->get_type() << endl;
+  s << "#offset: " << get_func_offset(expr->get_type(), name) << endl;
   emit_load(T1, get_func_offset(expr->get_type(), name), T2, s);
 
   dispatch_class_name = expr->type;

@@ -10,14 +10,26 @@ enum Basicness     {Basic, NotBasic};
 #define TRUE 1
 #define FALSE 0
 
-#define ITERATE_LIST_NODE(listName) \
-for (int i = 0; i < listName->len(); ++i)
+#define ITERATE_LIST_NODE(list) \
+for (int i = 0; i < list->len(); ++i)
+
+#define ITERATE_LIST(list) \
+for (int i = 0; i < list->size(); ++i)
+
+#define ITERATE_LIST_REVERSE(list) \
+for (int i = list->size() - 1; i >= 0; --i)
 
 class CgenClassTable;
 typedef CgenClassTable *CgenClassTableP;
 
 class CgenNode;
 typedef CgenNode *CgenNodeP;
+
+typedef std::vector<std::pair<Symbol, Symbol> > MethodList;
+typedef std::pair<Symbol, Symbol> Method;
+
+typedef std::vector<Symbol> AttrList;
+typedef Symbol Attr;
 
 class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
 private:
@@ -82,8 +94,8 @@ public:
   void code_init(ostream &s, CgenClassTable *table);
   void code_methods(ostream &s, CgenClassTable *table);
 
-  int place_attr_list(ostream &s, CgenClassTable *table, int offset);
-  int place_method_list(ostream &s, CgenClassTable *table, int offset);
+  void collect_attr_list(ostream &s, CgenClassTable *table, AttrList &attr_list);
+  void collect_method_list(ostream &s, CgenClassTable *table, MethodList &method_list);
   int attrs_init(ostream &s, CgenClassTable *table, int attr_pos);
 
    void add_child(CgenNodeP child);
