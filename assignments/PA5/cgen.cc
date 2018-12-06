@@ -148,7 +148,7 @@ int get_attr_offset(Symbol attr_name) {
   AttrList *list = class_attr_list_map[dispatch_class_name];
   ITERATE_LIST(list) {
     Attr a = (*list)[i];
-    if (attr_name == a) {
+    if (attr_name == a.first) {
       return i + 3;
     }
   }
@@ -184,7 +184,7 @@ int symbol_in_method_list(Symbol symbol, MethodList &method_list) {
 
 int symbol_in_attr_list(Symbol symbol, AttrList &attr_list) {
   for (int i = 0; i < attr_list.size(); i++) {
-    if (attr_list[i] == symbol) {
+    if (attr_list[i].first == symbol) {
       return i;
     }
   }
@@ -511,7 +511,7 @@ static void emit_debug_map(ostream &s) {
     auto list = a.second;
     ITERATE_LIST(list) {
       Attr a = (*list)[i];
-      s << "#\t\t" << a << ": " << i << endl;
+      s << "#\t\t" << a.first << ": " << i << endl;
     }
   }
 
@@ -1032,7 +1032,18 @@ void CgenNode::code_prototype(ostream &s, CgenClassTable *table) {
     class_attr_list_map[name] = attr_list;
     collect_attr_list(s, table, *attr_list);
     ITERATE_LIST(attr_list) {
-      s << WORD << "0" << endl;
+      Symbol type = (*attr_list)[i].second;
+      s << WORD;
+      if (type == Int) {
+        inttable.lookup_string("0")->code_ref(s);
+      } else if (type == Bool) {
+        falsebool.code_ref(s);
+      } else if (type == Str) {
+        stringtable.lookup_string("")->code_ref(s);
+      } else {
+        s << "0";
+      }
+      s << endl;
     }
   } else if (name == Str) {
     s << WORD; inttable.lookup_string("0")->code_ref(s); s << endl;
@@ -1058,6 +1069,8 @@ void CgenNode::code_dispatch(ostream &s, CgenClassTable *table) {
 }
 
 void CgenNode::code_init(ostream &s, CgenClassTable *table) {
+  curr_class_name = name;
+  dispatch_class_name = name;
   s << name << CLASSINIT_SUFFIX << LABEL;
   if (!basic()) {
     emit_before_method(nullptr, s);
@@ -1090,10 +1103,11 @@ void CgenNode::collect_attr_list(ostream &s, CgenClassTable *table, AttrList &at
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
       int offset;
+      Attr a(f->name, f->type_decl);
       if ((offset = symbol_in_attr_list(f->name, attr_list) )== -1) {
-        attr_list.push_back(f->name);
+        attr_list.push_back(a);
       } else {
-        attr_list[offset] = f->name;
+        attr_list[offset] = a;
       }
     }
   }
@@ -1125,7 +1139,9 @@ int CgenNode::attrs_init(ostream &s, CgenClassTable *table, int attr_pos) {
     auto f = dynamic_cast<attr_class*>(features->nth(i));
     if (f != nullptr) {
       curr_type = f->type_decl;
+      emit_push(SELF, s);
       f->init->code(s);
+      emit_pop(SELF, s);
       emit_store(ACC, attr_pos++, SELF, s);
     }
   }
@@ -1214,9 +1230,9 @@ void CgenClassTable::code()
 //                   - object initializer
 //                   - the class methods
 //                   - etc...
-  emit_debug_map(str);
   code_class_initializer();
   code_class_methods();
+  emit_debug_map(str);
 }
 
 
@@ -1482,7 +1498,10 @@ void divide_class::code(ostream &s) {
 
 void neg_class::code(ostream &s) {
   e1->code(s);
-  emit_neg(ACC, ACC, s);
+  emit_load_intval(T2, ACC, s); // T2 will not change in emit_alloc_obj
+  emit_neg(T2, T2, s);          // this way too hack, use stack based way
+  emit_alloc_obj(Int, s);
+  emit_store_intval(T2, ACC, s);
 }
 
 #define COMPARE_VALUE(op, s)  \
@@ -1537,6 +1556,10 @@ void bool_const_class::code(ostream& s) {
 
 void new__class::code(ostream &s) {
   emit_alloc_obj(type_name, s);
+  emit_push(ACC, s);
+  emit_move(SELF, ACC, s);
+  s << JAL << type_name << CLASSINIT_SUFFIX << endl;
+  emit_pop(ACC, s);
 }
 
 void isvoid_class::code(ostream &s) {

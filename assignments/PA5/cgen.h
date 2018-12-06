@@ -25,11 +25,11 @@ typedef CgenClassTable *CgenClassTableP;
 class CgenNode;
 typedef CgenNode *CgenNodeP;
 
-typedef std::vector<std::pair<Symbol, Symbol> > MethodList;
 typedef std::pair<Symbol, Symbol> Method;
+typedef std::vector<Method> MethodList;
 
-typedef std::vector<Symbol> AttrList;
-typedef Symbol Attr;
+typedef std::pair<Symbol, Symbol> Attr;
+typedef std::vector<Attr> AttrList;
 
 class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
 private:
