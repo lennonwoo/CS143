@@ -352,6 +352,13 @@ static void emit_beqz(char *source, int label, ostream &s)
   s << endl;
 }
 
+static void emit_bnez(char *source, int label, ostream &s)
+{
+  s << BNEZ << source << " ";
+  emit_label_ref(label,s);
+  s << endl;
+}
+
 static void emit_beq(char *src1, char *src2, int label, ostream &s)
 {
   s << BEQ << src1 << " " << src2 << " ";
@@ -1261,7 +1268,41 @@ void assign_class::code(ostream &s) {
   OP_SYMBOL(emit_store);
 }
 
+#define CHECK_DISPATCH_VOID()               \
+  int next_label = label_num++;             \
+  emit_bnez(SELF, next_label, s);           \
+  emit_load_imm(T1, get_line_number(), s);  \
+  emit_load_address(ACC, "str_const0", s);  \
+  emit_jal(DISPATCH_VOID_ABORT, s);         \
+  emit_label_def(next_label, s);
+
+
 void static_dispatch_class::code(ostream &s) {
+  s << endl;
+  s << "#static dispatch start: " << name << endl;
+  emit_push(SELF, s);
+
+  ITERATE_LIST_NODE(actual) {
+    auto a = actual->nth(i);
+    a->code(s);
+    emit_push(ACC, s);
+  }
+
+  expr->code(s);
+  if (expr->type != SELF_TYPE && expr->type != self) {
+    emit_move(SELF, ACC, s);
+    s << endl;
+  }
+  CHECK_DISPATCH_VOID();
+
+  dispatch_class_name = expr->type;
+  s << JAL << type_name << METHOD_SEP << name << endl;
+  dispatch_class_name = curr_class_name;
+
+  s << endl;
+  emit_pop(SELF, s);
+  s << "#static dispatch ended: " << endl;
+  s << endl;
 }
 
 void dispatch_class::code(ostream &s) {
@@ -1280,10 +1321,9 @@ void dispatch_class::code(ostream &s) {
     emit_move(SELF, ACC, s);
     s << endl;
   }
+  CHECK_DISPATCH_VOID();
 
   emit_load(T2, DEFAULT_OBJFIELDS-1, SELF, s);
-  s << "#type: " << expr->get_type() << endl;
-  s << "#offset: " << get_func_offset(expr->get_type(), name) << endl;
   emit_load(T1, get_func_offset(expr->get_type(), name), T2, s);
 
   dispatch_class_name = expr->type;

@@ -100,6 +100,7 @@
 #define SUB   "\tsub\t"
 #define SLL   "\tsll\t"
 #define BEQZ  "\tbeqz\t"
+#define BNEZ  "\tbnez\t"
 #define BRANCH   "\tb\t"
 #define BEQ      "\tbeq\t"
 #define BNE      "\tbne\t"
@@ -109,3 +110,5 @@
 
 #define CASE_ERROR_VOID "\t_case_abort2"
 #define CASE_ERROR_NONE "\t_case_abort"
+
+#define DISPATCH_VOID_ABORT "\t_dispatch_abort"
