@@ -38,9 +38,7 @@ private:
    int stringclasstag;
    int intclasstag;
    int boolclasstag;
-  std::map<Symbol, int> symbolTagMap;
-  std::vector<Symbol> symbolTabList;
-  int classTagIndex;
+  std::vector<Symbol> classList;
 
 
 // The following methods emit code for
@@ -53,6 +51,8 @@ private:
    void code_constants();
    void code_prototype_objects();
    void code_nameTab();
+   void code_protoTab();
+   void code_initTab();
    void code_dispatch_tables();
    void code_class_initializer();
    void code_class_methods();

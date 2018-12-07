@@ -264,6 +264,10 @@ static void emit_load_boolval(char *dest_reg, char *source_reg, ostream& s) {
   emit_load(dest_reg, DEFAULT_OBJFIELDS, source_reg, s);
 }
 
+static void emit_store_boolval(char *source_reg, char *dest_reg, ostream& s) {
+  emit_store(source_reg, DEFAULT_OBJFIELDS, dest_reg, s);
+}
+
 static void emit_partial_load_address(char *dest_reg, ostream& s)
 { s << LA << dest_reg << " "; }
 
@@ -473,6 +477,23 @@ static void emit_gc_check(char *source, ostream &s)
 static void emit_alloc_obj(Symbol name, ostream &s) {
   s << LA << ACC << " " << name << PROTOBJ_SUFFIX << endl;
   s << JAL << "Object.copy" << endl;
+}
+
+#define LOAD_TAB(TAB)                     \
+  emit_load(ACC, 0, SELF, s);             \
+  s << LA << T1 << " " << TAB << endl;    \
+  emit_sll(ACC, ACC, 2, s);               \
+  emit_add(ACC, ACC, T1, s);              \
+  emit_load(ACC, 0, ACC, s);
+
+static void emit_alloc_self_type(ostream &s) {
+  LOAD_TAB(CLASSPROTOTAB)
+  s << JAL << "Object.copy" << endl;
+}
+
+static void emit_init_self_type(ostream &s) {
+  LOAD_TAB(CLASSINITTAB)
+  emit_jalr(ACC, s);
 }
 
 static void emit_before_method(method_class *f, ostream &s) {
@@ -797,7 +818,6 @@ void CgenClassTable::code_constants()
 
 CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 {
-   classTagIndex =  0;
    stringclasstag = getTag(Str);
    intclasstag = getTag(Int);
    boolclasstag = getTag(Bool);
@@ -1156,16 +1176,14 @@ int CgenClassTable::getTag(CgenNode *node) {
 }
 
 int CgenClassTable::getTag(Symbol s) {
-  auto it = symbolTagMap.find(s);
-
-  if (it != symbolTagMap.end()) {
-    return it->second;
-  } else {
-    int assignTag = classTagIndex++;
-    symbolTagMap[s] = assignTag;
-    symbolTabList.push_back(s);
-    return assignTag;
+  for (int i = 0; i < classList.size(); ++i) {
+    if (classList[i] == s) {
+      return i;
+    }
   }
+
+  classList.push_back(s);
+  return classList.size()-1;
 }
 
 void CgenClassTable::code_prototype_objects() {
@@ -1178,10 +1196,26 @@ void CgenClassTable::code_prototype_objects() {
 void CgenClassTable::code_nameTab() {
   str << CLASSNAMETAB << LABEL;
 
-  for (auto s: symbolTabList) {
+  for (auto s: classList) {
     str << WORD;
     stringtable.lookup_string(s->get_string())->code_ref(str);
     str << endl;
+  }
+}
+
+void CgenClassTable::code_protoTab() {
+  str << CLASSPROTOTAB << LABEL;
+
+  for (auto s: classList) {
+    str << WORD << s << PROTOBJ_SUFFIX << endl;
+  }
+}
+
+void CgenClassTable::code_initTab() {
+  str << CLASSINITTAB << LABEL;
+
+  for (auto s: classList) {
+    str << WORD << s << CLASSINIT_SUFFIX << endl;
   }
 }
 
@@ -1225,6 +1259,8 @@ void CgenClassTable::code()
 //
   code_prototype_objects();
   code_nameTab();
+  code_protoTab();
+  code_initTab();
   code_dispatch_tables();
 
   code_global_text();
@@ -1539,7 +1575,9 @@ void leq_class::code(ostream &s) {
 
 void comp_class::code(ostream &s) {
   e1->code(s);
-  s << "not" << " " << ACC << " " << ACC << endl;
+  emit_load_boolval(T1, ACC, s);
+  s << "\tnot" << " " << T1 << " " << T1 << endl;
+  emit_store_boolval(T1, ACC, s);
 }
 
 void int_const_class::code(ostream& s)  {
@@ -1558,11 +1596,23 @@ void bool_const_class::code(ostream& s) {
 }
 
 void new__class::code(ostream &s) {
-  emit_alloc_obj(type_name, s);
+  if (type_name == SELF_TYPE) {
+    emit_alloc_self_type(s);
+  } else {
+    emit_alloc_obj(type_name, s);
+  }
+
+  emit_push(SELF, s);
   emit_push(ACC, s);
   emit_move(SELF, ACC, s);
-  s << JAL << type_name << CLASSINIT_SUFFIX << endl;
+
+  if (type_name == SELF_TYPE) {
+    emit_init_self_type(s);
+  } else {
+    s << JAL << type_name << CLASSINIT_SUFFIX << endl;
+  }
   emit_pop(ACC, s);
+  emit_pop(SELF, s);
 }
 
 void isvoid_class::code(ostream &s) {
