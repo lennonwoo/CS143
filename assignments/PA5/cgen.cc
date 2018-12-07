@@ -165,6 +165,9 @@ int get_env_offset(Symbol name) {
 }
 
 int get_formal_offset(Symbol name) {
+  if (curr_method == nullptr) { // in code_init do not have current method
+    return -1;
+  }
   ITERATE_LIST_NODE(curr_method->formals) {
     auto f = dynamic_cast<formal_class*>(curr_method->formals->nth(i));
     if (f->name == name)
@@ -1073,7 +1076,7 @@ void CgenNode::code_init(ostream &s, CgenClassTable *table) {
   dispatch_class_name = name;
   s << name << CLASSINIT_SUFFIX << LABEL;
   if (!basic()) {
-    emit_before_method(nullptr, s);
+    emit_before_method(nullptr, s); // init do no have formal env
     attrs_init(s, table, DEFAULT_OBJFIELDS);
     emit_after_method(8, s);
   } else {
