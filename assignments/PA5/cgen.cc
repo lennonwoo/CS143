@@ -1322,12 +1322,12 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 
 #define OP_SYMBOL(op)                                     \
   int offset;                                             \
-  if ((offset = get_attr_offset(name)) != -1) {           \
-    op(ACC, offset, SELF, s);                             \
+  if ((offset = get_env_offset(name)) != -1) {            \
+    op(ACC, -offset, FP, s);                              \
   } else if ((offset = get_formal_offset(name)) != -1) {  \
     op(ACC, offset, FP, s);                               \
-  } else if ((offset = get_env_offset(name)) != -1) {     \
-    op(ACC, -offset, FP, s);                              \
+  } else if ((offset = get_attr_offset(name)) != -1) {    \
+    op(ACC, offset, SELF, s);                             \
   }
 
 void assign_class::code(ostream &s) {
