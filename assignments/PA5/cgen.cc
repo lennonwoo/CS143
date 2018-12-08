@@ -1363,8 +1363,11 @@ void static_dispatch_class::code(ostream &s) {
   }
   CHECK_DISPATCH_VOID();
 
-  dispatch_class_name = expr->type;
-  s << JAL << type_name << METHOD_SEP << name << endl;
+  s << LA << T2 << " " << type_name << DISPTAB_SUFFIX << endl;
+  emit_load(T1, get_func_offset(type_name, name), T2, s);
+
+  dispatch_class_name = type_name;
+  emit_jalr(T1, s);
   dispatch_class_name = curr_class_name;
 
   s << endl;
