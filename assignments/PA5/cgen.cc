@@ -194,6 +194,15 @@ int symbol_in_attr_list(Symbol symbol, AttrList &attr_list) {
   return -1;
 }
 
+bool basic_type(Symbol type) {
+  if (type == Int ||
+      type == Bool ||
+      type == Str) {
+    return true;
+  } else {
+    return false;
+  }
+}
 
 //*********************************************************
 //
@@ -439,6 +448,10 @@ static void emit_add_env(Symbol name, ostream& str) {
   env.enterscope();
   emit_push(ACC, str);
   env.addid(name, new int(func_obj_num++));
+}
+
+static void emit_eq(char *reg, char *s1, char *s2, ostream& str) {
+  str << SEQ << reg << " " << s1 << " " << s2 << endl;
 }
 
 
@@ -1564,9 +1577,15 @@ void eq_class::code(ostream &s) {
   e2->code(s);
   emit_move(T2, ACC, s);
   emit_pop(T1, s);
-  emit_load_bool(ACC, truebool, s);
-  emit_load_bool(A1, falsebool, s);
-  emit_jal("equality_test", s);
+
+  if (basic_type(e1->type)) {
+    emit_load_bool(ACC, truebool, s);
+    emit_load_bool(A1, falsebool, s);
+    emit_jal("equality_test", s);
+  } else {
+    emit_eq(ACC, T1, T2, s);
+    COND(emit_load_bool(ACC, truebool, s), emit_load_bool(ACC, falsebool, s));
+  }
 }
 
 void leq_class::code(ostream &s) {
@@ -1621,12 +1640,11 @@ void isvoid_class::code(ostream &s) {
 }
 
 void no_expr_class::code(ostream &s) {
-  if (curr_type == Int ||
-      curr_type == Str ||
-      curr_type == Bool)
+  if (basic_type(curr_type)) {
     emit_alloc_obj(curr_type, s);
-  else
+  } else {
     emit_load_imm(ACC, 0, s);
+  }
 }
 
 void object_class::code(ostream &s) {

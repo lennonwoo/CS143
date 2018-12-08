@@ -108,6 +108,7 @@
 #define BLEQ     "\tble\t"
 #define BLT      "\tblt\t"
 #define BGT      "\tbgt\t"
+#define SEQ      "\tseq\t"
 
 #define CASE_ERROR_VOID "\t_case_abort2"
 #define CASE_ERROR_NONE "\t_case_abort"
