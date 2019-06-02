@@ -114,3 +114,4 @@
 #define CASE_ERROR_NONE "\t_case_abort"
 
 #define DISPATCH_VOID_ABORT "\t_dispatch_abort"
+#define GENGC_ASSIGN "\t_GenGC_Assign"

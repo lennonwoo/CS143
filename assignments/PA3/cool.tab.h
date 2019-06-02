@@ -1,4 +1,4 @@
-/* A Bison parser, made by GNU Bison 3.0.5.  */
+/* A Bison parser, made by GNU Bison 3.2.  */
 
 /* Bison interface for Yacc-like parsers in C
 
@@ -29,6 +29,9 @@
 
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
+
+/* Undocumented macros, especially those whose name start with YY_,
+   are private implementation details.  Do not rely on them.  */
 
 #ifndef YY_COOL_YY_COOL_TAB_H_INCLUDED
 # define YY_COOL_YY_COOL_TAB_H_INCLUDED
@@ -106,7 +109,7 @@ extern int cool_yydebug;
 
 union YYSTYPE
 {
-#line 89 "cool.y" /* yacc.c:1910  */
+#line 89 "cool.y" /* yacc.c:1906  */
 
       Boolean boolean;
       Symbol symbol;
@@ -124,7 +127,7 @@ union YYSTYPE
       char *error_msg;
     
 
-#line 128 "cool.tab.h" /* yacc.c:1910  */
+#line 131 "cool.tab.h" /* yacc.c:1906  */
 };
 
 typedef union YYSTYPE YYSTYPE;

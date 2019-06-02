@@ -1320,14 +1320,21 @@ CgenNode::CgenNode(Class_ nd, Basicness bstatus, CgenClassTableP ct) :
 //
 //*****************************************************************
 
+#define GEN_GC_ASSIGN(offset, reg)   \
+  emit_load(A1, (offset), reg, s);  \
+  emit_jal(GENGC_ASSIGN, s);
+
 #define OP_SYMBOL(op)                                     \
   int offset;                                             \
   if ((offset = get_env_offset(name)) != -1) {            \
     op(ACC, -offset, FP, s);                              \
+    GEN_GC_ASSIGN(-offset, FP);                            \
   } else if ((offset = get_formal_offset(name)) != -1) {  \
     op(ACC, offset, FP, s);                               \
+    GEN_GC_ASSIGN(offset, FP);                             \
   } else if ((offset = get_attr_offset(name)) != -1) {    \
     op(ACC, offset, SELF, s);                             \
+    GEN_GC_ASSIGN(offset, SELF);                           \
   }
 
 void assign_class::code(ostream &s) {

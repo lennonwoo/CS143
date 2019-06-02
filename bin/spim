@@ -25,9 +25,9 @@ done
 COOL_INST=$(cd `dirname $0` && pwd)/..
 
 # set environment for spim/xspim
-DEFAULT_TRAP_HANDLER=$COOL_INST/lib/trap.handler
-export DEFAULT_TRAP_HANDLER
-
+#DEFAULT_TRAP_HANDLER=$COOL_INST/lib/trap.handler
+#DEFAULT_TRAP_HANDLER=/usr/class/cs143/cool/lib/trap.handler
+#export DEFAULT_TRAP_HANDLER
 
 
 # function to substitute an absolute path for a relative path
@@ -52,14 +52,14 @@ print os.path.abspath(sys.argv[1])' $1`
 
 # fix command line arguments to have relative paths rather than absolute paths
 # if $1 is not a flag we assume it is a file
-if [ ${1:0:1} != "-" ]; then
-    abspath=`getabspath "$1"`
-    if [ "$abspath" == "ERROR" ]; then
-        echo "$progname: $1: No such file or directory." >&2
-        exit 1
-    fi
-    set -- "$abspath" "${@:2}"
-fi
+#if [ ${1:0:1} != "-" ]; then
+#    abspath=`getabspath "$1"`
+#    if [ "$abspath" == "ERROR" ]; then
+#        echo "$progname: $1: No such file or directory." >&2
+#        exit 1
+#    fi
+#    set -- "$abspath" "${@:2}"
+#fi
 for ((i=1; i<=$#; i++))  
 do
     if [ "${!i}" == "-file" -o "${!i}" == "-execute" -o "${!i}" == "-trap_file" ]; then
